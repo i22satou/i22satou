@@ -6,7 +6,7 @@ import glob
 import os
 import collections
 import time
-import japanize_matplotlib
+import japanize_matplotlib #日本語用のライブラリ
 
 # --- 1. 定数・スケールの設定 (L字マップの仕様に合わせる) ---
 REAL_LENGTH_M = 8.75    # 現実のL字直線部の長さ (m)
