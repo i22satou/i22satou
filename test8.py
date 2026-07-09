@@ -1,6 +1,9 @@
+##読み込んだ地図を自動で2値画像に変換してtest7の動作をするプログラム
+##今現在は正しく動作しない(地図の2値化が失敗する)
 import numpy as np
 import pandas as pd
 import os
+import json
 
 os.environ.setdefault("MPLCONFIGDIR", "/private/tmp/matplotlib")
 
@@ -45,12 +48,20 @@ except ImportError:
 # 1. 定数・スケールの設定
 # ============================================================
 BASE_DIR = Path(__file__).resolve().parent
+DEFAULT_MAP_CONFIG = BASE_DIR / "map_configs" / "l_map.json"
 
 REAL_LENGTH_M = 8.75
 MAP_LENGTH_P  = 350.0
 M_TO_PIXEL    = MAP_LENGTH_P / REAL_LENGTH_M  # 40 px/m
 TARGET_DISTANCE_PX = MAP_LENGTH_P * 2.0       # L字の横350px + 縦350px
 DEFAULT_STEP_GAIN = 1.12                      # PFの壁判定で削られる分を少し補正
+USE_L_HEADING_CORRECTION = True
+WALL_DILATION_PX = 5
+KEEP_START_COMPONENT = True
+LINE_MAP_DARK_RATIO = 0.20
+LINE_DARK_THRESHOLD = 220
+LINE_MIN_WALL_COMPONENT_AREA = 80
+MAP_CROP = None
 
 # 初期位置：横通路の左端中央
 START_X = 70.0
@@ -108,20 +119,22 @@ def parse_args():
         description="SmartPDR風のステップ検出・歩幅推定を加えたPDR推定を行います。"
     )
     parser.add_argument(
+        "--map-config",
+        type=Path,
+        default=DEFAULT_MAP_CONFIG,
+        help="地図ごとの設定JSON。未指定ならL字地図用の設定を読み込みます。",
+    )
+    parser.add_argument(
         "--data-dir",
         type=Path,
-        default=Path(
-        "/Users/soma/Library/CloudStorage/GoogleDrive-satosoma0608@gmail.com/マイドライブ/PDR"
-        ),
-        help="pdr_log_*.csv と L_map.png があるディレクトリ",
+        default=None,
+        help="pdr_log_*.csv があるディレクトリ。指定するとJSONの値を上書きします。",
     )
     parser.add_argument(
         "--map",
         type=Path,
-        default=Path(
-        "/Users/soma/Library/CloudStorage/OneDrive-独立行政法人国立高等専門学校機構/卒業研究/i22satou/L_map.png"
-        ),
-        help="使用するマップ画像。未指定なら data-dir/L_map.png",
+        default=None,
+        help="使用するマップ画像。指定するとJSONの値を上書きします。",
     )
     parser.add_argument(
         "--save",
@@ -143,8 +156,8 @@ def parse_args():
     parser.add_argument(
         "--target-distance-px",
         type=float,
-        default=TARGET_DISTANCE_PX,
-        help="歩幅を校正する目標移動距離(px)。L字全体なら700px。",
+        default=None,
+        help="歩幅を校正する目標移動距離(px)。指定するとJSONの値を上書きします。",
     )
     parser.add_argument(
         "--no-step-calibration",
@@ -154,15 +167,150 @@ def parse_args():
     parser.add_argument(
         "--step-gain",
         type=float,
-        default=DEFAULT_STEP_GAIN,
-        help="校正後の歩幅に掛ける追加倍率。短い場合は1.15〜1.25程度に上げます。",
+        default=None,
+        help="校正後の歩幅に掛ける追加倍率。指定するとJSONの値を上書きします。",
     )
     parser.add_argument(
         "--no-watch",
         action="store_true",
         help="CSVフォルダ監視を行わず、1回だけ描画して終了します。",
     )
+    parser.add_argument(
+        "--map-mode",
+        choices=["auto", "fixed", "otsu", "adaptive", "line"],
+        default=None,
+        help=(
+            "地図画像から通路/壁を判定する方法。lineは白地に黒線の平面図向け。auto/otsu/adaptiveは白黒以外の画像向け、"
+            "fixedは従来通り127で2値化します。指定するとJSONの値を上書きします。"
+        ),
+    )
+    parser.add_argument(
+        "--wall-dilation-px",
+        type=int,
+        default=None,
+        help="lineモードで黒い壁線を太らせるピクセル数。指定するとJSONの値を上書きします。",
+    )
+    parser.add_argument(
+        "--line-dark-threshold",
+        type=int,
+        default=None,
+        help="lineモードで壁線候補とみなす濃さのしきい値。大きいほど薄い線や文字も拾います。",
+    )
+    parser.add_argument(
+        "--line-min-wall-area",
+        type=int,
+        default=None,
+        help="lineモードで壁候補として残す黒成分の最小面積。大きいほど文字や数字を消しやすくなります。",
+    )
+    parser.add_argument(
+        "--map-crop",
+        type=str,
+        default=None,
+        help="地図画像の切り抜き範囲 x0,y0,x1,y1。指定するとJSONの値を上書きします。",
+    )
+    parser.add_argument(
+        "--keep-start-component",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="開始位置とつながる通路領域だけを残すかどうか。指定するとJSONの値を上書きします。",
+    )
+    parser.add_argument(
+        "--save-binary-map",
+        type=Path,
+        default=None,
+        help="自動判定した白黒地図を確認用に保存します。",
+    )
     return parser.parse_args()
+
+
+def resolve_config_path(path):
+    path = Path(path).expanduser()
+    if not path.is_absolute():
+        path = (Path.cwd() / path).resolve()
+    return path
+
+
+def resolve_config_value_path(value, config_dir):
+    if value is None:
+        return None
+    path = Path(value).expanduser()
+    if not path.is_absolute():
+        path = (config_dir / path).resolve()
+    return path
+
+
+def load_map_config(config_path):
+    config_path = resolve_config_path(config_path)
+    if not config_path.exists():
+        raise FileNotFoundError(f"地図設定JSONが見つかりません: {config_path}")
+
+    with config_path.open("r", encoding="utf-8") as f:
+        config = json.load(f)
+    return config, config_path
+
+
+def apply_map_config(args, config, config_path):
+    global REAL_LENGTH_M, MAP_LENGTH_P, M_TO_PIXEL, TARGET_DISTANCE_PX
+    global DEFAULT_STEP_GAIN, START_X, START_Y
+    global L_TURN_START_X, L_TURN_END_X, HEADING_EAST, HEADING_SOUTH
+    global USE_L_HEADING_CORRECTION, WALL_DILATION_PX, KEEP_START_COMPONENT
+
+    config_dir = config_path.parent
+
+    REAL_LENGTH_M = float(config.get("real_length_m", REAL_LENGTH_M))
+    MAP_LENGTH_P = float(config.get("map_length_px", MAP_LENGTH_P))
+    M_TO_PIXEL = float(config.get("scale_px_per_m", MAP_LENGTH_P / REAL_LENGTH_M))
+    TARGET_DISTANCE_PX = float(config.get("target_distance_px", MAP_LENGTH_P * 2.0))
+    DEFAULT_STEP_GAIN = float(config.get("step_gain", DEFAULT_STEP_GAIN))
+    WALL_DILATION_PX = int(config.get("wall_dilation_px", WALL_DILATION_PX))
+    KEEP_START_COMPONENT = bool(config.get("keep_start_component", KEEP_START_COMPONENT))
+
+    start = config.get("start", {})
+    START_X = float(start.get("x", START_X))
+    START_Y = float(start.get("y", START_Y))
+
+    heading_config = config.get("heading_correction", {})
+    USE_L_HEADING_CORRECTION = heading_config.get("type", "l_shape") == "l_shape"
+    L_TURN_START_X = float(heading_config.get("turn_start_x", L_TURN_START_X))
+    L_TURN_END_X = float(heading_config.get("turn_end_x", L_TURN_END_X))
+    HEADING_EAST = np.deg2rad(float(heading_config.get("heading_before_deg", 0.0)))
+    HEADING_SOUTH = np.deg2rad(float(heading_config.get("heading_after_deg", 90.0)))
+
+    data_dir = args.data_dir
+    if data_dir is None:
+        data_dir = resolve_config_value_path(config.get("data_dir"), config_dir)
+    else:
+        data_dir = args.data_dir.expanduser().resolve()
+    if data_dir is None:
+        data_dir = BASE_DIR
+
+    map_path = args.map
+    if map_path is None:
+        map_path = resolve_config_value_path(config.get("map_image"), config_dir)
+    else:
+        map_path = args.map.expanduser().resolve()
+    if map_path is None:
+        map_path = data_dir / "L_map.png"
+
+    args.data_dir = data_dir
+    args.map = map_path
+    args.target_distance_px = (
+        TARGET_DISTANCE_PX if args.target_distance_px is None
+        else args.target_distance_px
+    )
+    args.step_gain = DEFAULT_STEP_GAIN if args.step_gain is None else args.step_gain
+    args.map_mode = config.get("map_mode", "auto") if args.map_mode is None else args.map_mode
+    if args.wall_dilation_px is not None:
+        WALL_DILATION_PX = args.wall_dilation_px
+    if args.keep_start_component is not None:
+        KEEP_START_COMPONENT = args.keep_start_component
+
+    print(f"地図設定JSON: {config_path}")
+    print(f"使用地図: {args.map}")
+    print(f"CSVフォルダ: {args.data_dir}")
+    print(f"開始位置: x={START_X:.1f}, y={START_Y:.1f}")
+    print(f"縮尺: {M_TO_PIXEL:.2f} px/m")
+    print(f"地図2値化モード: {args.map_mode}")
 
 
 def compute_acc_magnitude(df):
@@ -294,6 +442,9 @@ def correct_heading_with_l_map(x, sensor_heading):
     L_map.png専用の簡易マップマッチング。
     横通路では東向き、曲がり角以降では南向きへ方位を寄せる。
     """
+    if not USE_L_HEADING_CORRECTION:
+        return sensor_heading
+
     if x <= L_TURN_START_X:
         map_heading = HEADING_EAST
         map_weight = 3.0
@@ -413,42 +564,214 @@ def validate_log(df, file_name):
     df = df[df['timestamp'].diff().fillna(1) > 0].reset_index(drop=True)
     return df
 
+
+def _disk_kernel(size):
+    if HAS_CV2:
+        return cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (size, size))
+    return np.ones((size, size), dtype=bool)
+
+
+def _threshold_gray(gray, mode):
+    if mode == "fixed":
+        return gray > 127
+
+    if HAS_CV2 and mode in {"auto", "otsu"}:
+        _, th = cv2.threshold(
+            gray.astype(np.uint8),
+            0,
+            255,
+            cv2.THRESH_BINARY + cv2.THRESH_OTSU,
+        )
+        return th == 255
+
+    if HAS_CV2 and mode == "adaptive":
+        block_size = max(15, (min(gray.shape) // 20) | 1)
+        th = cv2.adaptiveThreshold(
+            gray.astype(np.uint8),
+            255,
+            cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+            cv2.THRESH_BINARY,
+            block_size,
+            2,
+        )
+        return th == 255
+
+    threshold = float(np.mean(gray))
+    if mode in {"auto", "otsu"}:
+        # OpenCVがない場合の簡易Otsu。画像全体の明暗が分かれていれば十分効く。
+        hist, _ = np.histogram(gray.ravel(), bins=256, range=(0, 256))
+        total = gray.size
+        sum_total = np.dot(np.arange(256), hist)
+        sum_bg = 0.0
+        weight_bg = 0.0
+        best_var = -1.0
+        for t in range(256):
+            weight_bg += hist[t]
+            if weight_bg == 0:
+                continue
+            weight_fg = total - weight_bg
+            if weight_fg == 0:
+                break
+            sum_bg += t * hist[t]
+            mean_bg = sum_bg / weight_bg
+            mean_fg = (sum_total - sum_bg) / weight_fg
+            between_var = weight_bg * weight_fg * (mean_bg - mean_fg) ** 2
+            if between_var > best_var:
+                best_var = between_var
+                threshold = t
+    return gray > threshold
+
+
+def _clean_passage_mask(mask):
+    if HAS_CV2:
+        mask_u8 = np.where(mask, 255, 0).astype(np.uint8)
+        close_kernel = _disk_kernel(5)
+        open_kernel = _disk_kernel(3)
+        mask_u8 = cv2.morphologyEx(mask_u8, cv2.MORPH_CLOSE, close_kernel, iterations=1)
+        mask_u8 = cv2.morphologyEx(mask_u8, cv2.MORPH_OPEN, open_kernel, iterations=1)
+        return mask_u8 == 255
+
+    closed = ndimage.binary_closing(mask, structure=_disk_kernel(5), iterations=1)
+    opened = ndimage.binary_opening(closed, structure=_disk_kernel(3), iterations=1)
+    return opened
+
+
+def _build_line_map_passage_mask(gray):
+    """
+    白地に黒/灰色の線で壁が描かれた平面図向け。
+    黒線を壁として抽出し、少し太らせてから、それ以外を通路候補にする。
+    """
+    wall_mask = gray <= 220
+
+    if HAS_CV2:
+        wall_u8 = np.where(wall_mask, 255, 0).astype(np.uint8)
+        kernel = _disk_kernel(max(1, WALL_DILATION_PX))
+        wall_u8 = cv2.dilate(wall_u8, kernel, iterations=1)
+        wall_u8 = cv2.morphologyEx(wall_u8, cv2.MORPH_CLOSE, _disk_kernel(3), iterations=1)
+        wall_mask = wall_u8 == 255
+    else:
+        wall_mask = ndimage.binary_dilation(
+            wall_mask,
+            structure=_disk_kernel(max(1, WALL_DILATION_PX)),
+            iterations=1,
+        )
+        wall_mask = ndimage.binary_closing(wall_mask, structure=_disk_kernel(3), iterations=1)
+
+    return ~wall_mask
+
+
+def _ensure_start_is_passage(mask):
+    sx = int(np.clip(round(START_X), 0, mask.shape[1] - 1))
+    sy = int(np.clip(round(START_Y), 0, mask.shape[0] - 1))
+    y0, y1 = max(0, sy - 5), min(mask.shape[0], sy + 6)
+    x0, x1 = max(0, sx - 5), min(mask.shape[1], sx + 6)
+    start_ratio = np.mean(mask[y0:y1, x0:x1])
+
+    # 開始位置は必ず通路という前提を使い、白黒の向きを自動で合わせる。
+    if start_ratio < 0.5:
+        mask = ~mask
+    return mask
+
+
+def _keep_start_component(mask):
+    sx = int(np.clip(round(START_X), 0, mask.shape[1] - 1))
+    sy = int(np.clip(round(START_Y), 0, mask.shape[0] - 1))
+    labels, num = ndimage.label(mask)
+    if num == 0:
+        return mask
+
+    start_label = labels[sy, sx]
+    if start_label == 0:
+        # 開始点が細い線やノイズ処理で外れた場合、近傍の最大成分を使う。
+        y0, y1 = max(0, sy - 10), min(mask.shape[0], sy + 11)
+        x0, x1 = max(0, sx - 10), min(mask.shape[1], sx + 11)
+        near_labels = labels[y0:y1, x0:x1]
+        near_labels = near_labels[near_labels > 0]
+        if len(near_labels) > 0:
+            start_label = np.bincount(near_labels).argmax()
+
+    if start_label == 0:
+        sizes = ndimage.sum(mask, labels, index=np.arange(1, num + 1))
+        start_label = int(np.argmax(sizes) + 1)
+    return labels == start_label
+
+
+def load_map_as_passage_mask(img_path, mode):
+    """
+    任意の地図画像を、通路=255・壁=0の2値画像へ変換する。
+    auto/otsuでは明るい領域を通路候補とし、開始地点が通路になるよう必要なら反転する。
+    """
+    if not img_path.exists():
+        raise FileNotFoundError(f"マップ画像を読み込めません: {img_path}")
+
+    if HAS_CV2:
+        img_bgr = cv2.imread(str(img_path), cv2.IMREAD_COLOR)
+        if img_bgr is None:
+            raise FileNotFoundError(f"マップ画像を読み込めません: {img_path}")
+        gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
+    else:
+        gray = np.array(Image.open(img_path).convert("L"))
+
+    dark_ratio = float(np.mean(gray <= 127))
+    actual_mode = "line" if mode == "auto" and dark_ratio < LINE_MAP_DARK_RATIO else mode
+
+    if actual_mode == "line":
+        passage_mask = _build_line_map_passage_mask(gray)
+    else:
+        passage_mask = _threshold_gray(gray, actual_mode)
+        passage_mask = _ensure_start_is_passage(passage_mask)
+        passage_mask = _clean_passage_mask(passage_mask)
+
+    if KEEP_START_COMPONENT:
+        passage_mask = _keep_start_component(passage_mask)
+
+    white_ratio = float(np.mean(passage_mask))
+    print(
+        f"地図2値化: requested={mode}, actual={actual_mode}, "
+        f"dark_ratio={dark_ratio:.3f}, passage_ratio={white_ratio:.3f}, "
+        f"wall_dilation_px={WALL_DILATION_PX}"
+    )
+
+    binary = np.where(passage_mask, 255, 0).astype(np.uint8)
+
+    if HAS_CV2:
+        binary_for_pf = cv2.erode(binary, _disk_kernel(5), iterations=4)
+        dist_map = cv2.distanceTransform(binary_for_pf, cv2.DIST_L2, 5)
+    else:
+        eroded = ndimage.binary_erosion(
+            binary == 255,
+            structure=np.ones((5, 5), dtype=bool),
+            iterations=4,
+        )
+        binary_for_pf = np.where(eroded, 255, 0).astype(np.uint8)
+        dist_map = ndimage.distance_transform_edt(binary_for_pf == 255)
+
+    dist_max = dist_map.max()
+    if dist_max > 0:
+        dist_map = dist_map / dist_max
+
+    return binary, binary_for_pf, dist_map
+
 # ============================================================
 # 4. マップの読み込みと前処理
 # ============================================================
 args = parse_args()
-data_dir = args.data_dir.resolve()
-img_path = args.map.resolve() if args.map else data_dir / "L_map.png"
+map_config, map_config_path = load_map_config(args.map_config)
+apply_map_config(args, map_config, map_config_path)
+data_dir = args.data_dir
+img_path = args.map
 if args.seed is not None:
     np.random.seed(args.seed)
 
-if HAS_CV2:
-    img_gray = cv2.imread(str(img_path), cv2.IMREAD_GRAYSCALE)
-    if img_gray is None:
-        raise FileNotFoundError(f"マップ画像を読み込めません: {img_path}")
+binary, binary_for_pf, dist_map = load_map_as_passage_mask(img_path, args.map_mode)
 
-    _, binary = cv2.threshold(img_gray, 127, 255, cv2.THRESH_BINARY)
-    kernel = np.ones((5, 5), np.uint8)
-    binary_for_pf = cv2.erode(binary, kernel, iterations=4)
-    dist_map = cv2.distanceTransform(binary_for_pf, cv2.DIST_L2, 5)
-else:
-    if not img_path.exists():
-        raise FileNotFoundError(f"マップ画像を読み込めません: {img_path}")
-
-    img_gray = np.array(Image.open(img_path).convert("L"))
-    binary = np.where(img_gray > 127, 255, 0).astype(np.uint8)
-    eroded = ndimage.binary_erosion(
-        binary == 255,
-        structure=np.ones((5, 5), dtype=bool),
-        iterations=4,
-    )
-    binary_for_pf = np.where(eroded, 255, 0).astype(np.uint8)
-    dist_map = ndimage.distance_transform_edt(binary_for_pf == 255)
+if args.save_binary_map is not None:
+    binary_map_path = args.save_binary_map.resolve()
+    binary_map_path.parent.mkdir(parents=True, exist_ok=True)
+    Image.fromarray(binary).save(binary_map_path)
+    print(f"白黒化した地図を保存しました: {binary_map_path}")
 
 h, w = binary.shape
-dist_max = dist_map.max()
-if dist_max > 0:
-    dist_map = dist_map / dist_max
 
 # ============================================================
 # 5. リアルタイム描画関数
@@ -728,9 +1051,9 @@ def redraw_all_paths():
     print(f"Overall time: {end_overall - start_overall:.2f} seconds")
 
     ax.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
-    title = "test7: SmartPDR風ステップ検出 + 動的歩幅 + 方位選択 + パーティクルフィルタ"
+    title = "test8: 自動地図2値化 + SmartPDR風ステップ検出 + パーティクルフィルタ"
     if japanize_matplotlib is None:
-        title = "test7: SmartPDR step detection + dynamic step length + PF"
+        title = "test8: auto map binarization + SmartPDR step detection + PF"
     ax.set_title(title)
 
     fig.subplots_adjust(right=0.72)

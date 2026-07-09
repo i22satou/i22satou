@@ -1,0 +1,25 @@
+{
+  "name": "L_map",
+  "description": "test7/test8で使っていたL字通路地図用の設定",
+  "data_dir": "/Users/soma/Library/CloudStorage/GoogleDrive-satosoma0608@gmail.com/マイドライブ/PDR",
+  "map_image": "../L_map.png",
+  "map_mode": "auto",
+  "wall_dilation_px": 5,
+  "keep_start_component": true,
+  "real_length_m": 8.75,
+  "map_length_px": 350.0,
+  "scale_px_per_m": 40.0,
+  "target_distance_px": 700.0,
+  "step_gain": 1.12,
+  "start": {
+    "x": 70.0,
+    "y": 250.0
+  },
+  "heading_correction": {
+    "type": "l_shape",
+    "turn_start_x": 310.0,
+    "turn_end_x": 340.0,
+    "heading_before_deg": 0.0,
+    "heading_after_deg": 90.0
+  }
+}
