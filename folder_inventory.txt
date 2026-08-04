@@ -1,8 +1,0 @@
-.
-./__pycache__
-./.git
-./Copilot
-./map_configs
-./test9_final_project
-./test9_final_project/__pycache__
-./test9_final_project/map_configs

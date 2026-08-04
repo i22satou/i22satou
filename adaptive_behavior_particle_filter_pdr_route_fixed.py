@@ -1,5 +1,33 @@
 # ============================================================================
-# adaptive_behavior_particle_filter_pdr.py
+# adaptive_behavior_particle_filter_pdr_route_fixed.py
+#
+# 変更履歴 (このファイル冒頭に要約):
+# - 2026-08-03: 経路線分切替の安全チェック追加（曲がり先近傍確認、過走時許可）
+# - 2026-08-03: path_hits_wall のサンプリング誤り修正（粒子ごとにサンプル制限）
+# - 2026-08-03: CSV検出を glob -> os.listdir ベースへ変更（macOS のUnicode正規化対策）
+# - 2026-08-03: 曲がり予定時に経路方位影響を一時強化して誤逸脱を抑制
+# - 2026-08-03: 歩幅の自動総距離校正を追加（経路長に基づくスケーリング）
+#
+# 修正実行ログと出力画像は [i22satou/output_fixed.png](i22satou/output_fixed.png)
+# を参照してください。
+#
+# 使用AI: GPT-5 mini
+# 修正日: 2026-08-03
+# ============================================================================
+#
+# 【今回の経路切替修正】
+# - 曲がり検出をturn_pendingとして保持し、PFが曲がり角付近へ到達した時だけ線分を進める。
+# - 移動様態判定より前に経路方位補正していた処理順を修正。
+# - 判定順を「センサー方位 -> 移動様態判定 -> 経路線分切替 -> 方位補正 -> PF更新」に変更。
+# - 最近傍線分を毎歩選び直す方式をやめ、CSVごとに単調増加するroute_segment_indexを保持。
+# - 曲がり終了後も次の縦通路線分を維持し、水平線分へ戻らないようにする。
+# - 指定経路を図上へ破線表示し、route_pointsが通路中央にあるか確認可能にする。
+#
+# 【今回の判定修正】
+# - ヨーレート最大値を廃止し、75パーセンタイルへ変更。
+# - 曲がり開始条件を OR から AND へ変更。
+# - 曲がり終了時は方位変化とヨーレートが両方小さいことを要求。
+# - 直進中の手ぶれで全歩がTURNINGになる問題を抑制。
 #
 # 【test11_gemini.py からの主な変更点】
 # 1. 歩行者の移動様態を STOPPED / STRAIGHT / TURNING の3状態で判定する。
@@ -94,8 +122,11 @@ WALL_WEIGHT_FLOOR = 0.50
 OFF_ROUTE_WEIGHT = 0.15
 ROUTE_WIDTH_PX = 18.0
 ROUTE_HEADING_WEIGHT = 1.5
+ROUTE_CORNER_THRESHOLD_PX = 25.0
 ROUTE_POINTS = []
 GYRO_UNIT = "rad"
+# 経路上粒子をどれだけ有利にするか（1.0 で2倍の優先度）
+ROUTE_PRIORITY_BONUS = 1.0
 
 # ============================================================
 # 2. パーティクルフィルタのパラメータ
@@ -110,13 +141,13 @@ SIGMA_STEP_TURNING = 0.70
 SIGMA_STEP_STOPPED = 0.10
 
 SIGMA_ANGLE_STRAIGHT = np.deg2rad(3.0)
-SIGMA_ANGLE_TURNING = np.deg2rad(18.0)
+SIGMA_ANGLE_TURNING = np.deg2rad(15.0)
 SIGMA_ANGLE_STOPPED = np.deg2rad(2.0)
 
-BEHAVIOR_WINDOW_SEC = 2.0
+BEHAVIOR_WINDOW_SEC = 1.5
 TURN_ENTER_THRESHOLD = np.deg2rad(20.0)
-TURN_EXIT_THRESHOLD = np.deg2rad(8.0)
-TURN_YAW_RATE_THRESHOLD = np.deg2rad(15.0)
+TURN_EXIT_THRESHOLD = np.deg2rad(6.0)
+TURN_YAW_RATE_THRESHOLD = np.deg2rad(20.0)
 PARTICLE_RESIZE_JITTER_PX = 0.50
 
 STEP_MIN_INTERVAL = 5
@@ -242,41 +273,63 @@ def detect_move_behavior(
     previous_behavior,
     step_detected,
 ):
-    """一定時間内の方位変化とヨーレートから直進・曲がり・滞留を判定する。
+    """方位変化と持続的なヨーレートから移動様態を判定する。
 
-    TURNINGからSTRAIGHTへ戻る閾値を小さくするヒステリシスにより、
-    曲がり角付近で判定が頻繁に往復することを防ぐ。
+    一瞬の手ぶれやジャイロの外れ値だけでTURNINGにならないよう、
+    直近区間のヨーレート最大値ではなく75パーセンタイルを用いる。
+
+    STRAIGHTからTURNINGへ移るには、方位変化とヨーレートの
+    両条件を満たす必要がある。TURNINGからSTRAIGHTへ戻る際は、
+    両方が十分小さくなったことを確認するヒステリシス判定を行う。
     """
     if not step_detected:
         return MoveBehavior.STOPPED
 
     current_time = float(timestamps[current_index])
     start_index = current_index
+
     while start_index > 0:
-        elapsed = current_time - float(timestamps[start_index - 1])
+        previous_time = float(timestamps[start_index - 1])
+        elapsed = current_time - previous_time
         if elapsed > BEHAVIOR_WINDOW_SEC:
             break
         start_index -= 1
 
     heading_change = abs(
-        angle_diff(heading_history[current_index], heading_history[start_index])
+        angle_diff(
+            heading_history[current_index],
+            heading_history[start_index],
+        )
     )
+
     recent_yaw = yaw_rate_history[start_index:current_index + 1]
-    max_yaw_rate = float(np.max(np.abs(recent_yaw))) if len(recent_yaw) else 0.0
+    finite_yaw = np.abs(recent_yaw[np.isfinite(recent_yaw)])
+
+    if len(finite_yaw) > 0:
+        representative_yaw_rate = float(
+            np.percentile(finite_yaw, 75)
+        )
+    else:
+        representative_yaw_rate = 0.0
 
     if previous_behavior == MoveBehavior.TURNING:
-        if (
-            heading_change >= TURN_EXIT_THRESHOLD
-            or max_yaw_rate >= TURN_YAW_RATE_THRESHOLD * 0.5
-        ):
-            return MoveBehavior.TURNING
-        return MoveBehavior.STRAIGHT
-
-    if (
-        heading_change >= TURN_ENTER_THRESHOLD
-        or max_yaw_rate >= TURN_YAW_RATE_THRESHOLD
-    ):
+        turn_finished = (
+            heading_change < TURN_EXIT_THRESHOLD
+            and representative_yaw_rate
+            < TURN_YAW_RATE_THRESHOLD * 0.5
+        )
+        if turn_finished:
+            return MoveBehavior.STRAIGHT
         return MoveBehavior.TURNING
+
+    turn_started = (
+        heading_change >= TURN_ENTER_THRESHOLD
+        and representative_yaw_rate >= TURN_YAW_RATE_THRESHOLD
+    )
+
+    if turn_started:
+        return MoveBehavior.TURNING
+
     return MoveBehavior.STRAIGHT
 
 
@@ -394,10 +447,18 @@ class ParticleFilterPDR:
         max_steps = steps.max()
         
         for s in range(max_steps + 1):
-            ratio = s / np.maximum(steps, 1)
-            xs = x0 + dx * ratio
-            ys = y0 + dy * ratio
-            hit |= self.is_in_wall(xs, ys)
+            # 各粒子ごとに必要なサンプル数が異なるため、
+            # s がその粒子のステップ数以下の場合のみサンプリングする。
+            mask = s <= steps
+            if not np.any(mask):
+                continue
+            denom = steps[mask].astype(float)
+            ratio = s / denom
+            xs = x0[mask] + dx[mask] * ratio
+            ys = y0[mask] + dy[mask] * ratio
+            sub_hit = self.is_in_wall(xs, ys)
+            # mask を使って対応するインデックスへ反映
+            hit[mask] |= sub_hit
         return hit
 
     def update(self, step_px, step_heading, behavior=MoveBehavior.STRAIGHT):
@@ -429,9 +490,11 @@ class ParticleFilterPDR:
         )
         weights = self.params['wall_weight_floor'] + (1.0 - self.params['wall_weight_floor']) * wall_weights
 
-        # 経路優先重み
+        # 経路優先重み（経路上にいる粒子をさらに有利にする）
         on_route = self.route_mask[ny_idx, nx_idx]
-        weights *= np.where(on_route, 1.0, self.params['off_route_weight'])
+        # on_route の場合は 1.0 + ROUTE_PRIORITY_BONUS 倍する。off-route は既存のペナルティ。
+        route_multiplier = np.where(on_route, 1.0 + ROUTE_PRIORITY_BONUS, self.params['off_route_weight'])
+        weights *= route_multiplier
         
         # 方位ズレの重み
         particle_heading_error = angle_diff(p_angle, step_heading)
@@ -590,7 +653,8 @@ def apply_map_config(args, config, config_path):
     global M_TO_PIXEL, TARGET_DISTANCE_PX, DEFAULT_STEP_GAIN
     global START_X, START_Y, PF_EROSION_RADIUS_PX
     global WALL_WEIGHT_SIGMA, WALL_WEIGHT_FLOOR, OFF_ROUTE_WEIGHT
-    global ROUTE_WIDTH_PX, ROUTE_HEADING_WEIGHT, ROUTE_POINTS, GYRO_UNIT
+    global ROUTE_WIDTH_PX, ROUTE_HEADING_WEIGHT, ROUTE_CORNER_THRESHOLD_PX
+    global ROUTE_POINTS, GYRO_UNIT
     global N_PARTICLES_STRAIGHT, N_PARTICLES_TURNING, N_PARTICLES_STOPPED
     global SIGMA_STEP_STRAIGHT, SIGMA_STEP_TURNING, SIGMA_STEP_STOPPED
     global SIGMA_ANGLE_STRAIGHT, SIGMA_ANGLE_TURNING, SIGMA_ANGLE_STOPPED
@@ -608,6 +672,7 @@ def apply_map_config(args, config, config_path):
     OFF_ROUTE_WEIGHT = float(config.get("off_route_weight", OFF_ROUTE_WEIGHT))
     ROUTE_WIDTH_PX = float(config.get("route_width_px", ROUTE_WIDTH_PX))
     ROUTE_HEADING_WEIGHT = float(config.get("route_heading_weight", ROUTE_HEADING_WEIGHT))
+    ROUTE_CORNER_THRESHOLD_PX = float(config.get("route_corner_threshold_px", ROUTE_CORNER_THRESHOLD_PX))
     ROUTE_POINTS = [tuple(map(float, point)) for point in config.get("route_points", [])]
     GYRO_UNIT = str(config.get("gyro_unit", GYRO_UNIT)).lower()
     if GYRO_UNIT not in {"rad", "deg"}:
@@ -657,7 +722,11 @@ def apply_map_config(args, config, config_path):
     logging.info(f"縮尺: {M_TO_PIXEL:.2f} px/m")
     logging.info(f"ジャイロ単位: {GYRO_UNIT}/s")
     logging.info(f"PF収縮半径: {PF_EROSION_RADIUS_PX}px")
-    logging.info(f"経路優先: {len(ROUTE_POINTS)}点, 幅={ROUTE_WIDTH_PX:.1f}px, 経路外重み={OFF_ROUTE_WEIGHT:.2f}")
+    logging.info(
+        f"経路優先: {len(ROUTE_POINTS)}点, 幅={ROUTE_WIDTH_PX:.1f}px, "
+        f"曲がり角判定距離={ROUTE_CORNER_THRESHOLD_PX:.1f}px, "
+        f"経路外重み={OFF_ROUTE_WEIGHT:.2f}"
+    )
     logging.info("総距離校正: " + ("無効" if args.target_distance_px is None else f"{args.target_distance_px:.1f}px"))
 
 
@@ -773,36 +842,54 @@ def weighted_angle_mean(angles, weights):
     return np.arctan2(sin_sum, cos_sum)
 
 
-def nearest_route_heading(x, y):
+def get_route_segment_heading(route_segment_index):
+    """指定された経路線分の画像座標系における方位角を返す。"""
     if len(ROUTE_POINTS) < 2:
         return None
-    point = np.array([x, y], dtype=float)
-    best_distance = np.inf
-    best_heading = None
-    for start, end in zip(ROUTE_POINTS[:-1], ROUTE_POINTS[1:]):
-        a = np.array(start, dtype=float)
-        b = np.array(end, dtype=float)
-        segment = b - a
-        denom = float(np.dot(segment, segment))
-        if denom <= 1e-9:
-            continue
-        ratio = np.clip(np.dot(point - a, segment) / denom, 0.0, 1.0)
-        nearest = a + ratio * segment
-        distance = np.linalg.norm(point - nearest)
-        if distance < best_distance:
-            best_distance = distance
-            best_heading = np.arctan2(segment[1], segment[0])
-    return best_heading
+
+    index = int(np.clip(route_segment_index, 0, len(ROUTE_POINTS) - 2))
+    start = np.asarray(ROUTE_POINTS[index], dtype=float)
+    end = np.asarray(ROUTE_POINTS[index + 1], dtype=float)
+    direction = end - start
+
+    if np.linalg.norm(direction) <= 1e-9:
+        return None
+
+    # 画像座標では右=0、下=+pi/2、上=-pi/2。
+    return np.arctan2(direction[1], direction[0])
 
 
-def correct_heading_with_route(x, y, sensor_heading):
-    route_heading = nearest_route_heading(x, y)
+def correct_heading_with_route_segment(sensor_heading, route_segment_index):
+    """現在選択中の経路線分方向とセンサー方位を重み付き融合する。"""
+    route_heading = get_route_segment_heading(route_segment_index)
     if route_heading is None or ROUTE_HEADING_WEIGHT <= 0:
         return sensor_heading
+
     return weighted_angle_mean(
         np.array([sensor_heading, route_heading]),
         np.array([1.0, ROUTE_HEADING_WEIGHT]),
     )
+
+
+def advance_route_segment(route_segment_index):
+    """経路線分を1つ進める。前の線分へは戻さない。"""
+    if len(ROUTE_POINTS) < 2:
+        return 0
+    return min(route_segment_index + 1, len(ROUTE_POINTS) - 2)
+
+
+def distance_to_route_corner(x, y, route_segment_index):
+    """現在線分の終点、つまり次の曲がり角までの距離を返す。"""
+    if len(ROUTE_POINTS) < 2:
+        return float("inf")
+    corner_index = min(route_segment_index + 1, len(ROUTE_POINTS) - 1)
+    corner_x, corner_y = ROUTE_POINTS[corner_index]
+    return float(np.hypot(x - corner_x, y - corner_y))
+
+
+def is_near_route_corner(x, y, route_segment_index):
+    """PF推定位置が設定経路の曲がり角付近にあるか判定する。"""
+    return distance_to_route_corner(x, y, route_segment_index) <= ROUTE_CORNER_THRESHOLD_PX
 
 
 def has_magnetometer(df):
@@ -952,7 +1039,33 @@ def redraw_all_paths():
     ax.set_xlim(0, w)
     ax.set_ylim(h, 0)
 
-    file_list = glob.glob(str(data_dir / "pdr_log_*.csv"))
+    # JSONで指定した優先経路を破線表示する。
+    if len(ROUTE_POINTS) >= 2:
+        route_array = np.asarray(ROUTE_POINTS, dtype=float)
+        ax.plot(
+            route_array[:, 0],
+            route_array[:, 1],
+            color='magenta',
+            linestyle='--',
+            linewidth=1.5,
+            alpha=0.8,
+            label='Configured route',
+        )
+        ax.scatter(
+            route_array[:, 0],
+            route_array[:, 1],
+            color='magenta',
+            s=24,
+            zorder=8,
+        )
+
+    # glob はファイル名のUnicode正規化の違いで未検出になる場合があるため、
+    # os.listdir による直接列挙で確実に検出する。
+    try:
+        entries = os.listdir(str(data_dir))
+    except Exception:
+        entries = []
+    file_list = [str(data_dir / e) for e in entries if e.startswith('pdr_log_') and e.lower().endswith('.csv')]
     file_list.sort()
 
     if not file_list:
@@ -972,6 +1085,8 @@ def redraw_all_paths():
             estimated_positions = cached_result['estimated_positions']
             behavior_history = cached_result.get('behavior_history', [])
             particle_count_history = cached_result.get('particle_count_history', [])
+            route_segment_index = cached_result.get('route_segment_index', 0)
+            turn_pending = cached_result.get('turn_pending', False)
         else:
             try:
                 # 安全なファイル読み込み (同時書き込み時の不完全読み込みを防止)
@@ -1002,8 +1117,26 @@ def redraw_all_paths():
                 ]
                 raw_total_dist = sum(raw_step_lengths)
                 step_scale = 1.0
+
+                # 既定の総距離校正が指定されている場合はそれを使う。
                 if (not args.no_step_calibration and args.target_distance_px is not None and raw_total_dist > 0):
                     step_scale = args.target_distance_px / raw_total_dist
+                else:
+                    # 経路が定義されている場合、経路長と比較して自動スケーリングを試みる。
+                    try:
+                        if len(ROUTE_POINTS) >= 2 and raw_total_dist > 0:
+                            rp = np.asarray(ROUTE_POINTS, dtype=float)
+                            seg_dists = np.hypot(np.diff(rp[:, 0]), np.diff(rp[:, 1]))
+                            route_total_px = float(seg_dists.sum())
+                            # 実測距離が経路長の90%未満なら補正を適用
+                            if raw_total_dist < 0.9 * route_total_px and route_total_px > 0:
+                                step_scale = route_total_px / raw_total_dist
+                                logging.info(
+                                    "  自動歩幅校正: raw_total=%.1fpx route_len=%.1fpx scale=%.2f",
+                                    raw_total_dist, route_total_px, step_scale
+                                )
+                    except Exception:
+                        pass
 
                 step_lengths = [length * step_scale * args.step_gain for length in raw_step_lengths]
                 step_length_by_step = dict(zip(step_indices, step_lengths))
@@ -1025,7 +1158,7 @@ def redraw_all_paths():
                 'wall_weight_sigma': WALL_WEIGHT_SIGMA,
                 'wall_weight_floor': WALL_WEIGHT_FLOOR,
                 'off_route_weight': OFF_ROUTE_WEIGHT,
-                'smooth_window': SMOOTH_WINDOW,
+                        'smooth_window': SMOOTH_WINDOW,
                 'recovery_sigma': RECOVERY_SIGMA
             }
 
@@ -1049,6 +1182,10 @@ def redraw_all_paths():
             current_behavior    = MoveBehavior.STRAIGHT
             behavior_history    = []
             particle_count_history = []
+            # 曲がり検出はturn_pendingとして保持し、設定曲がり角へ
+            # 到達した時だけ次の線分へ進む。
+            route_segment_index = 0
+            turn_pending = False
 
             # 実際のサンプリングレートを推定して、Madgwickフィルタをインスタンス化
             madgwick = None
@@ -1135,21 +1272,146 @@ def redraw_all_paths():
                 segment_heading = heading_history[prev_step:i + 1]
                 step_heading = weighted_angle_mean(segment_heading, np.ones(len(segment_heading)))
                 
-                # パーティクルの重心を取得して補正
-                ref_x = np.average(pf.particles[:, 0], weights=pf.weights)
-                ref_y = np.average(pf.particles[:, 1], weights=pf.weights)
-                step_heading = correct_heading_with_route(ref_x, ref_y, step_heading)
-
+                # 1. センサー方位を使って移動様態を先に判定する。
+                #    経路補正後の方位で判定すると、実際の曲がりが水平経路へ
+                #    引き戻されるため、必ず補正前に判定する。
+                sensor_step_heading = step_heading
+                previous_behavior = current_behavior
                 current_behavior = detect_move_behavior(
                     df['timestamp'].to_numpy(),
                     heading_history,
                     yaw_rate_history,
                     i,
-                    current_behavior,
+                    previous_behavior,
                     step_detected=True,
                 )
 
-                # 移動様態に応じて粒子数・歩幅分散・方位分散を切り替えてPF更新
+                # 2. 曲がりを検出しても即時に経路を切り替えず、予定として保持する。
+                if (
+                    previous_behavior != MoveBehavior.TURNING
+                    and current_behavior == MoveBehavior.TURNING
+                    and route_segment_index < len(ROUTE_POINTS) - 2
+                ):
+                    turn_pending = True
+                    logging.info(
+                        "  曲がり予定を検出: step=%d, segment=%d",
+                        step_count,
+                        route_segment_index,
+                    )
+
+                if current_behavior != previous_behavior:
+                    logging.info(
+                        "  移動様態変化: step=%d, %s -> %s",
+                        step_count,
+                        previous_behavior.value,
+                        current_behavior.value,
+                    )
+
+                # 3. PF推定位置が設定曲がり角へ近づいた場合だけ線分を切り替える。
+                ref_x = np.average(pf.particles[:, 0], weights=pf.weights)
+                ref_y = np.average(pf.particles[:, 1], weights=pf.weights)
+                corner_distance = distance_to_route_corner(ref_x, ref_y, route_segment_index)
+
+                if (
+                    turn_pending
+                    and route_segment_index < len(ROUTE_POINTS) - 2
+                ):
+                    # 追加チェック: 曲がり先の曲がり角が通路上にあるか確認し、
+                    # 現在の（センサー由来の）歩行方位が次線分方向と大きく乖離
+                    # していないことを確かめてから線分切替を行う。
+                    corner_index = route_segment_index + 1
+                    corner_x, corner_y = ROUTE_POINTS[corner_index]
+                    cx_i = int(round(corner_x))
+                    cy_i = int(round(corner_y))
+                    corner_on_passage = False
+                    if 0 <= cx_i < w and 0 <= cy_i < h:
+                        # 単一ピクセルではなく近傍をチェックして、
+                        # 曲がり先に十分な通路幅があるか確認する。
+                        check_r = max(1, int(round(ROUTE_WIDTH_PX / 2)))
+                        x0_i = max(0, cx_i - check_r)
+                        x1_i = min(w - 1, cx_i + check_r)
+                        y0_i = max(0, cy_i - check_r)
+                        y1_i = min(h - 1, cy_i + check_r)
+                        patch = binary_for_pf[y0_i:y1_i + 1, x0_i:x1_i + 1]
+                        corner_on_passage = np.any(patch == 255)
+
+                    next_seg_heading = get_route_segment_heading(route_segment_index + 1)
+                    heading_aligned = True
+                    if next_seg_heading is not None:
+                        # センサー由来の方位（補正前）と次線分方位の差が大きすぎる
+                        # 場合は線分切替を保留する（誤った早期切替を抑制）。
+                        ang_err = abs(angle_diff(sensor_step_heading, next_seg_heading))
+                        heading_aligned = ang_err <= np.deg2rad(60.0)
+
+                    # 曲がり角に近い、または線分を越えて進んでしまった場合は切替を許可する
+                    near_corner = is_near_route_corner(ref_x, ref_y, route_segment_index)
+                    # 線分先端を越えたかどうかを確認
+                    start_pt = np.asarray(ROUTE_POINTS[route_segment_index], dtype=float)
+                    end_pt = np.asarray(ROUTE_POINTS[route_segment_index + 1], dtype=float)
+                    v = end_pt - start_pt
+                    vv = np.dot(v, v) if np.dot(v, v) != 0 else 1.0
+                    t = np.dot(np.asarray([ref_x, ref_y]) - start_pt, v) / vv
+                    passed_endpoint = t >= 0.9
+
+                    # passed_endpoint の場合は方位整合のチェックを緩和する
+                    if (near_corner or passed_endpoint) and corner_on_passage and (heading_aligned or passed_endpoint):
+                        old_segment_index = route_segment_index
+                        route_segment_index = advance_route_segment(route_segment_index)
+                        turn_pending = False
+                        logging.info(
+                            "  経路線分切替: step=%d, segment=%d -> %d, "
+                            "position=(%.1f, %.1f), corner_distance=%.1fpx",
+                            step_count,
+                            old_segment_index,
+                            route_segment_index,
+                            ref_x,
+                            ref_y,
+                            corner_distance,
+                        )
+                    else:
+                        logging.info(
+                            "  経路切替保留: step=%d, segment=%d, corner_on_passage=%s, heading_aligned=%s, near_corner=%s, passed_endpoint=%s",
+                            step_count,
+                            route_segment_index,
+                            corner_on_passage,
+                            heading_aligned,
+                            is_near_route_corner(ref_x, ref_y, route_segment_index),
+                            passed_endpoint,
+                        )
+
+                # 4. 現在選択中の経路線分方向でセンサー方位を補正する。
+                #    曲がり終了後もroute_segment_indexは維持されるため、
+                #    縦通路へ入った後に水平線分へ戻らない。
+                # 曲がり予定があるがまだ曲がり角へ到達していない場合は
+                # 経路方位の重みを強めて直進を優先させ、誤った早期逸脱を抑制する。
+                route_heading = get_route_segment_heading(route_segment_index)
+                if turn_pending and route_heading is not None and not is_near_route_corner(ref_x, ref_y, route_segment_index):
+                    # 一時的に経路の影響を強める（経験的に3倍程度）
+                    enhanced_weight = max(ROUTE_HEADING_WEIGHT * 3.0, ROUTE_HEADING_WEIGHT)
+                    step_heading = weighted_angle_mean(
+                        np.array([sensor_step_heading, route_heading]),
+                        np.array([1.0, enhanced_weight]),
+                    )
+                else:
+                    step_heading = correct_heading_with_route_segment(
+                        sensor_step_heading,
+                        route_segment_index,
+                    )
+
+                route_heading = get_route_segment_heading(route_segment_index)
+                logging.debug(
+                    "step=%d behavior=%s segment=%d sensor=%.1fdeg "
+                    "route=%s corrected=%.1fdeg yaw_rate=%.1fdeg/s",
+                    step_count,
+                    current_behavior.value,
+                    route_segment_index,
+                    np.rad2deg(sensor_step_heading),
+                    "None" if route_heading is None else f"{np.rad2deg(route_heading):.1f}deg",
+                    np.rad2deg(step_heading),
+                    np.rad2deg(yaw_rate_history[i]),
+                )
+
+                # 4. 移動様態に応じて粒子数・歩幅分散・方位分散を切り替えてPF更新。
                 pf.update(step_px, step_heading, current_behavior)
                 behavior_history.append(current_behavior.value)
                 particle_count_history.append(len(pf.particles))
@@ -1164,9 +1426,12 @@ def redraw_all_paths():
                 'extinction_count': extinction_count,
                 'behavior_history': behavior_history,
                 'particle_count_history': particle_count_history,
+                'route_segment_index': route_segment_index,
+                'turn_pending': turn_pending,
             })
 
             logging.info(f"  処理ステップ数: {step_count}  全滅回数: {extinction_count}")
+            logging.info(f"  最終経路線分: segment={route_segment_index}, turn_pending={turn_pending}")
             if particle_count_history:
                 straight_count = behavior_history.count(MoveBehavior.STRAIGHT.value)
                 turning_count = behavior_history.count(MoveBehavior.TURNING.value)
@@ -1195,9 +1460,9 @@ def redraw_all_paths():
     logging.info(f"Overall time: {end_overall - start_overall:.2f} seconds")
 
     ax.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
-    title = "移動様態適応型PF + SmartPDR（管理棟）"
+    title = "移動様態・経路線分連動型PF + SmartPDR（管理棟）"
     if japanize_matplotlib is None:
-        title = "Behavior-adaptive PF + SmartPDR"
+        title = "Behavior and route-segment adaptive PF + SmartPDR"
     ax.set_title(title)
 
     fig.subplots_adjust(right=0.72)
@@ -1238,6 +1503,13 @@ def main():
     if binary_for_pf[sy, sx] != 255:
         raise ValueError(f"開始位置が壁です: ({START_X}, {START_Y})")
     route_mask = build_route_mask(binary.shape)
+    # デバッグ情報: data_dir の存在確認と先頭数件をログ出力
+    try:
+        logging.info(f"DEBUG: data_dir repr={repr(args.data_dir)} exists={os.path.exists(str(args.data_dir))}")
+        sample_entries = os.listdir(str(args.data_dir))[:10]
+        logging.info(f"DEBUG: data_dir sample entries={sample_entries}")
+    except Exception as e:
+        logging.info(f"DEBUG: data_dir list error: {e}")
 
     plt.ion()
     fig, ax = plt.subplots(figsize=(10, 8))
