@@ -1,10 +1,6 @@
 {
   "map_image": "../kanri_4f_binary_final3.png",
   "data_dir": "/Users/soma/Library/CloudStorage/GoogleDrive-satosoma0608@gmail.com/マイドライブ/PDR",
-  "start": {
-    "x": 250.0,
-    "y": 230.0
-  },
   "scale_px_per_m": 11.4,
   "step_gain": 1.0,
   "pf_erosion_radius_px": 1,
@@ -13,9 +9,11 @@
   "wall_weight_floor": 0.5,
   "off_route_weight": 0.15,
   "route_width_px": 18.0,
+  "route_constraint_mode": "none",
   "route_heading_weight": 1.5,
+  "route_corner_threshold_px": 25.0,
   "route_points": [
-    [250.0,230.0],
+    [100.0,230.0],
     [440.0,230.0],
     [440.0,145.0]
   ],
