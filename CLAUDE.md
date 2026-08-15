@@ -90,17 +90,29 @@ what came from them versus what this research adds. `pdr_pf_clickstart.py`'s hea
     `correct_heading_with_route_segment`, `advance_route_segment`, `is_near_route_corner`,
     `route_constraint_mode`). **Neither paper uses map corridor/topology information at all** —
     this is the core of what this research adds ("地図形状を用いた適応制御").
+  - **Automatic corridor extraction from the binary map** (`pdr_pf_improved.py` only, added
+    2026-08-15, `--route-source {manual,auto}`): `extract_auto_route_mask()` derives the route
+    corridor mask directly from the map's free-space distance transform (largest connected
+    component under a width threshold) instead of a hand-drawn `route_points` polyline — see
+    [CLAUDE_MEMO.md](CLAUDE_MEMO.md) for the design rationale and visual verification. This
+    directly targets the "known limitation" below (manually-specified route). Segment-linked
+    heading correction (the bullet above) still requires an ordered polyline and does not yet
+    run in `auto` mode — see the limitation note below.
   - Map-scale-adapted particle counts (250/600/100, vs. the paper's 10/20) with
     weight-based resampling on resize (`resize_particle_set`).
   - Experiment infrastructure with no equivalent in either paper: click-to-register start
     positions (`start_positions.csv`), folder-watch auto-redraw (`CSVHandler`), per-run PNG
     archiving (see policy above).
 - **Known limitation to state honestly in the thesis**: `route_constraint_mode` in
-  `prefer`/`enforce` uses a *manually specified* near-correct route (`route_points`), so
-  it's a comparison baseline (進捗メモ's 方式D), not the final proposed method. The memo's
-  §4.1/§5.3/§20.2 describe reducing this dependency (auto-extracted corridor centerlines,
-  topology graph, multiple route hypotheses) as the next major implementation step — none of
-  that is implemented yet (see progress memo below for exact status per feature).
+  `prefer`/`enforce` with `route_source=manual` (still the default) uses a *manually specified*
+  near-correct route (`route_points`), so it's a comparison baseline (進捗メモ's 方式D), not the
+  final proposed method. `route_source=auto` (added 2026-08-15, `pdr_pf_improved.py` only)
+  removes the hand-drawn polyline for the *spatial* corridor constraint — real progress toward
+  方式E — but the corridor-topology graph, multiple route hypotheses, and uncertainty-driven
+  particle-count control described in 進捗メモ's §4.1/§5.3/§6.2/§6.4/§6.5/§20.2 are still not
+  implemented, and segment-linked heading correction still needs an ordered polyline (not yet
+  wired to `auto` mode). See [CLAUDE_MEMO.md](CLAUDE_MEMO.md) for what `auto` mode currently
+  does and doesn't cover.
 
 ## Progress memo — consult before planning any research/thesis-shaping work
 
@@ -131,6 +143,11 @@ mechanisms (e.g. Neff, position variance) are computed but not yet *used* anywhe
 コメント、「なぜそう判断したか」は`CLAUDE_MEMO.md`、という役割分担)。参照・追記の
 ルールは上の「Project policy」節を参照。
 
+別途 `CLAUDE_MEMO.txt`(2026-08-15〜)は上記2つと役割が異なる。こちらは卒業論文
+執筆時に参考にするための、章節見出し付きの文章(箇条書きではない地の文)の下書きで、
+`CLAUDE.md`/`CLAUDE_MEMO.md`のように変更・調査のたびに参照する必要はない。内容が
+まとまった区切りで追記・更新する(詳細は同ファイル冒頭の説明を参照)。
+
 ## Running the code
 
 Core third-party dependencies (install via pip, no pinned versions in-repo):
@@ -154,7 +171,9 @@ have registered start positions in `start_positions.csv`, so this runs non-inter
 Common flags (see `parse_args()` in whichever main script you're running): `--data-dir`,
 `--map`, `--seed`, `--step-gain`, `--pf-erosion-radius-px`, `--route-constraint-mode
 {none,prefer,enforce}`, `--no-watch` (single render instead of live folder watch),
-`--no-show` (headless, pairs with `--save`).
+`--no-show` (headless, pairs with `--save`). `pdr_pf_improved.py` only: `--route-source
+{manual,auto}` (default `manual`; `auto` extracts the route corridor mask from the map itself
+instead of `route_points` — see 本研究独自 list above).
 
 Utility scripts:
 - `map_binarizer.py` — CLI that turns an architectural floorplan image into the white
@@ -163,6 +182,13 @@ Utility scripts:
   `scale_px_per_m` for a map config JSON.
 - `Lmap.py` / `Cross.py` — generate synthetic L-shaped / cross-shaped test maps.
 - `Trajectory.py` — plots raw `pdr_log_*.csv` trajectories without a PF.
+- `compare_route_source.py` (added 2026-08-15) `[本研究独自]` — runs `pdr_pf_improved.py`
+  via subprocess under `none` / `manual-enforce` / `auto-enforce` conditions on the same
+  data/seed and parses the log output into a comparison table (CSV under `results/` + a
+  printed summary). Does not modify the PF itself. See
+  [CLAUDE_MEMO.md](CLAUDE_MEMO.md) for what it measures, its limits (no per-step ground
+  truth, so not a true RMSE), and the first comparison's results (mixed, not a uniform win
+  for `auto`).
 
 ## Architecture
 
@@ -180,7 +206,8 @@ kept in sync:
 - `pdr_pf_improved.py` — **the active script as of 2026-08-15** (see Project policy above);
   implement new work here. It's the more feature-complete branch (initial-heading calibration,
   selectable heading source `gyro`/`android`, PF diagnostic logging, route-segment
-  auto-selection from click position). As of 2026-08-15 it has been brought to parity with
+  auto-selection from click position, `--route-source {manual,auto}` automatic corridor
+  extraction — see 本研究独自 list above). As of 2026-08-15 it has been brought to parity with
   `pdr_pf_clickstart.py` on auto-save-PNG behavior, changelog convention, and
   `[SmartPDR]`/`[先行研究:移動様態PF]`/`[本研究独自]` origin tags (see
   [CLAUDE_MEMO.md](CLAUDE_MEMO.md) and the file's own changelog for what changed); the
@@ -225,7 +252,9 @@ divergences worth knowing before touching `enforce` mode or config loading:
 2. `load_preprocessed_map()` — loads the binary map PNG, builds an eroded version for PF
    collision checks (`pf_erosion_radius_px`) and a distance-transform map for soft wall
    weighting `[本研究独自]`. `build_route_mask()` rasterizes `route_points` from the config
-   into a route corridor mask used by `route_constraint_mode` `[本研究独自]`.
+   into a route corridor mask used by `route_constraint_mode` `[本研究独自]` (`route_source
+   =manual`, the default); `extract_auto_route_mask()` derives the same kind of mask directly
+   from the map instead (`route_source=auto`, `pdr_pf_improved.py` only) `[本研究独自]`.
 3. Folder watch: a `watchdog` `Observer` watches `data_dir` for `pdr_log_*.csv` files;
    `CSVHandler` sets an event flag, and `redraw_all_paths()` re-runs the full pipeline for
    every CSV and redraws the matplotlib figure. `PDRResultCache` short-circuits recompute for

@@ -2,6 +2,16 @@
 # pdr_pf_improved.py
 #
 # 【変更履歴】
+# - 2026-08-15: [本研究独自] 経路帯マスクを手動route_pointsに頼らず、二値地図から
+#               自動抽出できるようにした(--route-source {manual,auto}、既定はmanual
+#               で従来通り)。extract_auto_route_mask()が「壁までの距離が
+#               auto_route_max_half_width_px(既定20px)以下の移動可能領域」を通路候補とし、
+#               そのうち最大連結成分を通路網として採用する(広い部屋は距離が大きく候補から
+#               自然に外れる)。座標を一切与えずにkanri_4f.jpgの実廊下形状を高精度に再現
+#               できることを可視化で確認済み(詳細はCLAUDE_MEMO.md)。route_source=autoの
+#               場合はJSONのroute_pointsを意図的に無視する(手動座標ゼロにするため)ので、
+#               route_guidance_enabled()系の曲がり角連動方位補正は現状autoでは働かない
+#               (空間的な経路帯制約のみ。今後の課題)。
 # - 2026-08-15: 未使用コードを削除しファイル総行数を縮小。
 #               (1) 未使用import(dataclass)を削除。
 #               (2) 呼び出し箇所が一つもなかったestimate_step_length_px()
@@ -376,6 +386,10 @@ ROUTE_HEADING_WEIGHT = 1.5
 ROUTE_CORNER_THRESHOLD_PX = 25.0
 ROUTE_CONSTRAINT_MODE = "prefer"
 ROUTE_POINTS = []
+# [本研究独自] 経路帯マスクの生成元。manual=JSONのroute_pointsを人手で描画、
+# auto=二値地図から通路領域を自動抽出(extract_auto_route_mask)。
+ROUTE_SOURCE = "manual"
+AUTO_ROUTE_MAX_HALF_WIDTH_PX = 20.0
 GYRO_UNIT = "rad"
 # 別の図(L字経路用など)で使用しており、このJSONの実行対象からは除外したいCSVファイル名。
 # map_configs/*.jsonの"exclude_csv"(任意設定)から読み込む。ファイル名の完全一致で判定する。
@@ -1047,6 +1061,16 @@ def parse_args():
         ),
     )
     parser.add_argument(
+        "--route-source",
+        choices=["manual", "auto"],
+        default=None,
+        help=(
+            "経路帯マスクの生成元。manual=JSONのroute_pointsを使用(方式D)、"
+            "auto=二値地図から通路領域を自動抽出し手動route_pointsは使用しない"
+            "(本研究独自、曲がり角の方位補正はまだ対応せず空間マスクのみ)。"
+        ),
+    )
+    parser.add_argument(
         "--heading-source",
         choices=["gyro", "android"],
         default="gyro",
@@ -1114,6 +1138,7 @@ def apply_map_config(args, config, config_path):
     global WALL_WEIGHT_SIGMA, WALL_WEIGHT_FLOOR, OFF_ROUTE_WEIGHT
     global ROUTE_WIDTH_PX, ROUTE_HEADING_WEIGHT, ROUTE_CORNER_THRESHOLD_PX
     global ROUTE_CONSTRAINT_MODE, ROUTE_POINTS, GYRO_UNIT, EXCLUDED_CSV_NAMES
+    global ROUTE_SOURCE, AUTO_ROUTE_MAX_HALF_WIDTH_PX
     global N_PARTICLES_STRAIGHT, N_PARTICLES_TURNING, N_PARTICLES_STOPPED
     global SIGMA_STEP_STRAIGHT, SIGMA_STEP_TURNING, SIGMA_STEP_STOPPED
     global SIGMA_ANGLE_STRAIGHT, SIGMA_ANGLE_TURNING, SIGMA_ANGLE_STOPPED
@@ -1147,6 +1172,15 @@ def apply_map_config(args, config, config_path):
         )
     route_points = require_config_value(config, "route_points", config_name)
     ROUTE_POINTS = [tuple(map(float, point)) for point in route_points]
+    # route_source・auto_route_max_half_width_pxは任意設定(無ければmanual/20.0px)。
+    # autoの場合、JSONのroute_pointsは意図的に使わない(手動座標ゼロで経路帯を作るため)。
+    configured_route_source = str(config.get("route_source", "manual")).lower()
+    ROUTE_SOURCE = args.route_source if args.route_source is not None else configured_route_source
+    if ROUTE_SOURCE not in {"manual", "auto"}:
+        raise ValueError("route_sourceはmanualまたはautoのいずれかです。")
+    AUTO_ROUTE_MAX_HALF_WIDTH_PX = float(config.get("auto_route_max_half_width_px", 20.0))
+    if ROUTE_SOURCE == "auto":
+        ROUTE_POINTS = []
     GYRO_UNIT = str(require_config_value(config, "gyro_unit", config_name)).lower()
     if GYRO_UNIT not in {"rad", "deg"}:
         raise ValueError("gyro_unit は 'rad' または 'deg' を指定してください。")
@@ -1195,6 +1229,9 @@ def apply_map_config(args, config, config_path):
     logging.info(f"ジャイロ単位: {GYRO_UNIT}/s")
     logging.info(f"PF収縮半径: {PF_EROSION_RADIUS_PX}px")
     logging.info(f"経路制約モード: {ROUTE_CONSTRAINT_MODE}")
+    logging.info(f"経路帯生成元: {ROUTE_SOURCE}" + (
+        f" (半径閾値={AUTO_ROUTE_MAX_HALF_WIDTH_PX:.1f}px)" if ROUTE_SOURCE == "auto" else ""
+    ))
     logging.info(
         f"経路優先: {len(ROUTE_POINTS)}点, 幅={ROUTE_WIDTH_PX:.1f}px, "
         f"曲がり角判定距離={ROUTE_CORNER_THRESHOLD_PX:.1f}px, "
@@ -1514,6 +1551,25 @@ def build_route_mask(shape):
     return ndimage.binary_dilation(mask, structure=disk)
 
 
+# [本研究独自] 二値地図から通路領域を自動抽出し、経路帯マスクを作る(route_source=auto)。
+# build_route_mask()が手動route_pointsを太らせるのに対し、こちらは座標を一切与えず
+# 「壁までの距離がmax_half_width_px以下の移動可能領域」を通路候補とみなし、そのうち
+# 最大の連結成分を通路網として採用する(広い部屋は距離が大きく候補から外れるため、
+# 廊下だけが概ね残る)。曲がり角に連動した方位補正(route_guidance_enabled系)は
+# 順序付きroute_pointsが前提のため、autoではまだ対応しない(空間的な経路帯制約のみ)。
+def extract_auto_route_mask(binary_for_pf_local, max_half_width_px):
+    free = binary_for_pf_local == 255
+    dist = ndimage.distance_transform_edt(free)
+    corridor_candidate = free & (dist <= max_half_width_px)
+    labeled, n = ndimage.label(corridor_candidate, structure=np.ones((3, 3)))
+    if n == 0:
+        logging.warning("route_source=autoで通路領域が抽出できませんでした。全域を通路として扱います。")
+        return np.ones(free.shape, dtype=bool)
+    sizes = ndimage.sum(corridor_candidate, labeled, range(1, n + 1))
+    largest_label = int(np.argmax(sizes)) + 1
+    return labeled == largest_label
+
+
 # グローバルな描画・監視状態
 redraw_requested = threading.Event()
 result_cache = PDRResultCache()
@@ -1553,6 +1609,13 @@ def redraw_all_paths():
     ax.imshow(binary, cmap='gray')
     ax.set_xlim(0, w)
     ax.set_ylim(h, 0)
+
+    # [本研究独自] route_source=autoの場合、地図から自動抽出した通路帯を薄く塗って表示する
+    # (手動route_pointsの破線と対比できるように、not全域Trueのときだけ描画)。
+    if ROUTE_SOURCE == "auto" and route_mask is not None and not route_mask.all():
+        overlay = np.zeros((*route_mask.shape, 4))
+        overlay[route_mask] = (1.0, 0.0, 0.0, 0.15)
+        ax.imshow(overlay, zorder=1)
 
     # JSONで指定した優先経路を破線表示する。
     if len(ROUTE_POINTS) >= 2:
@@ -1994,12 +2057,12 @@ def redraw_all_paths():
     ax.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
     title = (
         "移動様態適応型PF + SmartPDR "
-        f"（経路制約: {ROUTE_CONSTRAINT_MODE}, 方位: {args.heading_source}）"
+        f"（経路制約: {ROUTE_CONSTRAINT_MODE}/{ROUTE_SOURCE}, 方位: {args.heading_source}）"
     )
     if japanize_matplotlib is None:
         title = (
             "Behavior-adaptive PF + SmartPDR "
-            f"(route={ROUTE_CONSTRAINT_MODE}, heading={args.heading_source})"
+            f"(route={ROUTE_CONSTRAINT_MODE}/{ROUTE_SOURCE}, heading={args.heading_source})"
         )
     ax.set_title(title)
 
@@ -2015,7 +2078,7 @@ def redraw_all_paths():
     else:
         timestamp = time.strftime("%Y%m%d_%H%M%S")
         seed_text = "none" if args.seed is None else str(args.seed)
-        auto_name = f"{timestamp}_route-{ROUTE_CONSTRAINT_MODE}_seed-{seed_text}.png"
+        auto_name = f"{timestamp}_route-{ROUTE_CONSTRAINT_MODE}-{ROUTE_SOURCE}_seed-{seed_text}.png"
         save_path = (RESULTS_DIR / auto_name).resolve()
     save_path.parent.mkdir(parents=True, exist_ok=True)
     fig.set_size_inches(10, 8, forward=True)
@@ -2043,7 +2106,14 @@ def main():
     h, w = binary.shape
     if not data_dir.exists():
         raise FileNotFoundError(f"CSVフォルダが見つかりません: {data_dir}")
-    route_mask = build_route_mask(binary.shape)
+    if ROUTE_SOURCE == "auto":
+        route_mask = extract_auto_route_mask(binary_for_pf, AUTO_ROUTE_MAX_HALF_WIDTH_PX)
+        logging.info(
+            f"自動抽出した通路マスク: 有効画素数={int(route_mask.sum())}/{route_mask.size} "
+            f"(半径閾値={AUTO_ROUTE_MAX_HALF_WIDTH_PX:.1f}px)"
+        )
+    else:
+        route_mask = build_route_mask(binary.shape)
 
     plt.ion()
     fig, ax = plt.subplots(figsize=(10, 8))
