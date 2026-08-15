@@ -1,229 +1,92 @@
 # ============================================================================
-# pdr_pf_improved.py
-#
-# 【変更履歴】
-# - 2026-08-05: CSVごとの既知開始位置を地図クリックで登録し、
-#               start_positions.csvから再利用する機能を追加。
+# pdr_pf_clickstart.py
+# - 2026-08-15: 実行のたびに推定結果PNGを必ず保存するよう変更。--save未指定時は
+#               results/ 以下へ実行日時・経路制約モード・乱数シードを含む
+#               ファイル名で自動保存する(研究進捗メモ15章の方針に対応)。
+# - 2026-08-15: SmartPDR・移動様態適応型PF(先行研究)に基づく処理と、本研究独自の
+#               処理(地図経路情報による曲がり判定・方位補正、距離場に基づく連続的な
+#               壁重み、地図規模に応じた適応的パーティクル数など)を区別できるよう、
+#               各処理の直前に出典コメント([SmartPDR]/[先行研究:移動様態PF]/
+#               [本研究独自])を追加。下部の「本プログラムの研究的位置づけ」も参照。
+# - 2026-08-05: CSVごとの既知開始位置を地図クリックで登録・再利用する機能を追加
 # - 2026-08-06: JSONで管理する地図・PF設定値をコード先頭の固定値から削除し、
 #               設定漏れは起動時にエラーとして検出するように整理。
-# - 2026-08-06: 経路マスク外を移動不可領域として扱えるようにし、
-#               部屋側へ推定経路が流れる表示を抑制。
-#               設定経路の破線描画も削除。
+# - 2026-08-06: 経路マスク外を移動不可領域として扱い、部屋側へ推定経路が
+#               流れる表示を抑制。設定経路の破線描画も削除。
 # - 2026-08-06: 手動L字経路への依存を比較条件として分離するため、
-#               route_constraint_modeのnone、prefer、enforceを追加。
-# - 2026-08-06: 計測開始時のセンサ方位を地図座標系へ合わせる
-#               初期方位補正を追加。
-# - 2026-08-06: 方位推定方法として、従来のジャイロ・Madgwick方式と、
-#               AndroidのTYPE_ROTATION_VECTORから記録したyaw_degを
-#               選択できる機能を追加。
-# - 2026-08-06: クリックした開始位置に最も近いroute_pointsの線分を選び、
-#               その線分を最初の経路線分として使用する処理を追加。
-# - 2026-08-06: 開始位置、経路制約モード、方位推定方法、
-#               初期方位、経路重みなどをキャッシュ判定へ追加。
-# - 2026-08-06: 有効粒子率、経路内粒子率、Neff、位置分散を記録し、
-#               CSVごとのPF診断値としてログ出力する機能を追加。
-# - 2026-08-06: 結果画像の凡例とタイトルを整理し、
-#               経路制約モードと方位推定方法を画像上へ表示。
+#               route_constraint_mode(none/prefer/enforce)を追加。
 #
-# 【既知開始位置の設定】
-# - 未登録のPDRデータは、地図上で実際の計測開始位置をクリックして指定する。
-# - クリックした開始位置はstart_positions.csvへ自動保存する。
-# - 登録済みのPDRデータは、次回以降、保存済みの開始位置を自動使用する。
-# - 開始位置が地図外、壁内、または移動不可領域の場合は再選択を要求する。
-# - 開始位置を変更する場合は、start_positions.csvから対象CSVの行を削除し、
-#   プログラムを再実行して開始位置をクリックし直す。
+# 【今回の経路切替修正】
+# - 曲がり検出をturn_pendingとして保持し、PFが曲がり角付近へ到達した時だけ線分を進める。
+# - 移動様態判定より前に経路方位補正していた処理順を修正。
+# - 判定順を「センサー方位 -> 移動様態判定 -> 経路線分切替 -> 方位補正 -> PF更新」に変更。
+# - 最近傍線分を毎歩選び直す方式をやめ、CSVごとに単調増加するroute_segment_indexを保持。
+# - 曲がり終了後も次の縦通路線分を維持し、水平線分へ戻らないようにする。
+# - 経路マスクを強制できるようにし、部屋などの白領域へ粒子が流れないようにする。
 #
-# 【初期方位補正】
-# - センサ方位の0度と地図画像上の0度は必ずしも一致しないため、
-#   計測開始時のセンサ方位を基準として地図座標系へ変換する。
-# - --initial-heading-degで、計測開始時の地図上の進行方向を指定する。
-# - 地図画像上では、右方向を0度、下方向を90度、
-#   左方向を180度、上方向を-90度として扱う。
-# - 例えば右方向へ歩き始めた場合は--initial-heading-deg 0、
-#   上方向へ歩き始めた場合は--initial-heading-deg -90を指定する。
-# - 複数のCSVで開始方向が異なる場合は、開始方向ごとに分けて実行する。
+# 【今回の判定修正】
+# - ヨーレート最大値を廃止し、75パーセンタイルへ変更。
+# - 曲がり開始条件を OR から AND へ変更。
+# - 曲がり終了時は方位変化とヨーレートが両方小さいことを要求。
+# - 直進中の手ぶれで全歩がTURNINGになる問題を抑制。
 #
-# 【方位推定方法】
-# - --heading-source gyroを指定した場合は、ジャイロ、加速度、
-#   Madgwickフィルタ、利用可能な場合は磁気センサを用いて方位を推定する。
-# - --heading-source androidを指定した場合は、
-#   AndroidのTYPE_ROTATION_VECTORから記録したyaw_degを使用する。
-# - android方式を使用する場合は、入力CSVにyaw_deg列が必要である。
-# - Android方位を使用する場合は、先頭の複数サンプルを円平均し、
-#   計測開始時の基準方位として使用する。
-# - --heading-calibration-samplesで、基準方位の計算に使用する
-#   先頭サンプル数を指定できる。既定値は30サンプルである。
-# - gyro方式とandroid方式を同一データ、同一開始位置、
-#   同一乱数シードで比較できる。
+# 【test11_gemini.py からの主な変更点】
+# 1. 歩行者の移動様態を STOPPED / STRAIGHT / TURNING の3状態で判定する。
+# 2. 直進時・曲がり時・滞留時でパーティクル数を動的に変更する。
+#    現在のJSON設定例: 直進250個、曲がり600個、滞留100個。
+# 3. 移動様態ごとに歩幅ノイズと方位ノイズの標準偏差を変更する。
+#    直進時は探索範囲を狭くし、曲がり時は方位探索範囲を広げる。
+# 4. 曲がり判定には一定時間内の方位変化とヨーレートを併用する。
+# 5. TURNING判定にヒステリシスを導入し、直進・曲がりの頻繁な振動を防ぐ。
+# 6. パーティクル増減時は重みに従って再サンプリングし、増加時は微小摂動を加える。
+# 7. 固定パーティクル数への依存を除き、リサンプリング・全滅復帰を可変数対応にする。
+# 8. CSVごとに直進・曲がり・滞留の更新回数、平均粒子数、最大粒子数を出力する。
+# 9. 論文の考え方に合わせ、曲がり時は直進時より粒子数と方位分散を大きくする。
 #
-# 【経路制約モード】
-# - --route-constraint-mode none:
-#     手動設定したroute_pointsを使用しない。
-#     センサ方位、歩幅、壁制約、移動様態適応PFによって位置を推定する。
-# - --route-constraint-mode prefer:
-#     route_points周辺の粒子を優遇する。
-#     経路外粒子は残すが、設定した経路周辺より低い重みを与える。
-# - --route-constraint-mode enforce:
-#     route_pointsから作成した経路マスク外を移動不可として扱う。
-#     手動経路へ強く拘束した比較用の方式である。
-# - preferとenforceは手動設定した経路を使用するため、
-#   正解に近い経路を事前に与えた比較条件として扱う。
-# - preferやenforceの軌跡が設定経路へ近づいても、
-#   その結果だけでは位置推定精度の向上を証明したことにはならない。
+# 注意:
+# - 論文では直進10個・屈折20個だが、本プログラムでは複雑な地図に合わせて
+#   同じ1:2程度の比率を保ちながら、JSONで250個・600個に設定している。
+# - 各値は map_configs/kanri_4f.json の adaptive_pf セクションで変更できる。
 #
-# 【経路線分切替】
-# - 従来は、すべてのCSVでroute_segment_indexを0から開始していた。
-# - 修正後は、クリックした開始位置とroute_pointsの各線分との距離を計算し、
-#   開始位置に最も近い経路線分を初期線分として選択する。
-# - 曲がり検出をturn_pendingとして保持し、
-#   PF推定位置が設定曲がり角付近へ到達した場合だけ次の線分へ進める。
-# - 判定順を「センサー方位、移動様態判定、経路線分切替、
-#   方位補正、PF更新」の順番とする。
-# - 最近傍線分を毎歩選び直す方式は使用せず、
-#   CSVごとに原則として単調増加するroute_segment_indexを保持する。
-# - 曲がり終了後も切り替え後の経路線分を維持し、
-#   前の通路方向へ戻らないようにする。
-# - 経路制約モードがnoneの場合は、経路線分による方位補正を使用しない。
+# 【本プログラムの研究的位置づけ(卒業論文 第2章・第5章の執筆用メモ)】
+# 本プログラムは以下2件の先行研究を基礎とし、そこに本研究独自の拡張を加えている。
+# 該当処理の直前コメントに [SmartPDR] [先行研究:移動様態PF] [本研究独自] のタグを
+# 付け、どの処理がどちらに由来するかをコード上でも追跡できるようにしている。
 #
-# 【移動様態判定】
-# - 歩行者の移動様態をSTOPPED、STRAIGHT、TURNINGの3状態で判定する。
-# - 曲がり判定には、一定時間内の方位変化とヨーレートを併用する。
-# - ヨーレートの瞬間的な最大値ではなく、75パーセンタイルを使用し、
-#   手ぶれなどの外れ値の影響を抑える。
-# - 曲がり開始条件は、方位変化とヨーレートの両方が
-#   閾値を超えた場合に成立するAND条件とする。
-# - 曲がり終了時は、方位変化とヨーレートの両方が
-#   終了閾値より小さいことを要求する。
-# - TURNING判定にはヒステリシスを導入し、
-#   STRAIGHTとTURNINGの頻繁な状態変化を防止する。
+# 参考文献1: SmartPDR: Smartphone-Based Pedestrian Dead Reckoning for Indoor
+#            Localization
+#   - 加速度のHPF/LPFによるステップ信号生成、ピーク・谷・傾き条件によるステップ
+#     検出(detect_steps_smartpdr)、4乗根式/対数式を切り替える歩幅推定式
+#     (estimate_smartpdr_step_length_px)の基礎として使用。
 #
-# 【移動様態適応型パーティクルフィルタ】
-# - 直進時、曲がり時、滞留時でパーティクル数を動的に変更する。
-# - 現在のJSON設定例は、直進250個、曲がり600個、滞留100個である。
-# - 直進時、曲がり時、滞留時で歩幅ノイズと方位ノイズを変更する。
-# - 直進時は探索範囲を狭くし、曲がり時は方位探索範囲を広げる。
-# - パーティクル数を変更する場合は、現在の重みに従って再サンプリングする。
-# - パーティクル数を増加させる場合は、複製粒子へ微小な位置摂動を加える。
-# - リサンプリング、壁衝突判定、全滅復帰処理を
-#   可変パーティクル数へ対応させる。
-# - CSVごとに、各移動様態の更新回数、平均粒子数、
-#   最小粒子数、最大粒子数、全滅回数をログへ出力する。
+# 参考文献2: 秋山高行ほか「移動様態に応じたパーティクルフィルタによる歩行者自律
+#            測位方式の提案と評価」(FIT2013)
+#   - 歩行者の移動様態(直進/屈折/滞留)を判定し、様態ごとにパーティクル数・歩幅と
+#     方位のノイズ分散を変更するという考え方の基礎として使用
+#     (behavior_parameters, detect_move_behavior)。
+#   - 原論文は8秒間に30度以上変化した場合に屈折と判定する単純な閾値判定、粒子数は
+#     直進10個・屈折20個、壁判定は通過0/移動可1の二値重みである。
 #
-# 【PF診断値】
-# - 各PF更新において、壁へ衝突しなかった粒子の割合を
-#   有効粒子率として記録する。
-# - route_pointsから作成した経路マスク内にある粒子の割合を
-#   経路内粒子率として記録する。
-# - 正規化後の粒子重みから実効サンプルサイズNeffを計算する。
-# - 粒子のx座標分散とy座標分散の合計を位置分散として記録する。
-# - CSVごとの処理終了時に、有効粒子率、経路内粒子率、
-#   平均Neff、平均位置分散をログへ出力する。
-# - 有効粒子率が低い場合は、壁へ衝突する粒子が多い可能性がある。
-# - Neffが低い場合は、少数の粒子へ重みが集中している可能性がある。
-# - 位置分散が大きい場合は、推定位置の不確実性が高い可能性がある。
-# - noneモードでは経路マスクが全領域を表すため、
-#   経路内粒子率は原則として1に近くなる。
+# 本研究独自の拡張(上記2件のどちらにも存在しない要素):
+#   - 壁までの距離場(distance_transform_edt)に基づく連続的な尤度重み付け。
+#     原論文の0/1二値重みに対する拡張(ParticleFilterPDR.update)。
+#   - ヨーレート75パーセンタイル・AND条件での屈折開始判定・ヒステリシスによる
+#     STRAIGHT/TURNINGの頻繁な振動抑制(detect_move_behavior)。原論文は単純な
+#     角度変化閾値のみで、ヨーレートの外れ値対策やヒステリシスは持たない。
+#   - 二値地図から抽出したroute_pointsによる経路帯マスク・曲がり角近傍判定・
+#     経路線分に連動した方位補正(route_constraint_mode, build_route_mask,
+#     correct_heading_with_route_segment, advance_route_segment,
+#     is_near_route_corner)。両先行研究には地図の通路方向情報を用いる処理は
+#     存在せず、本研究が追加した「地図形状を用いた適応制御」の中心部分にあたる。
+#   - 地図規模に合わせた適応的パーティクル数(直進250・曲がり600・滞留100)と、
+#     重みに基づくリサンプリングでの粒子数増減(resize_particle_set)。
+#   - 既知開始位置のクリック登録・再利用(start_positions.csv)、CSVフォルダ監視
+#     による自動再描画(CSVHandler)など、複数経路・複数試行を再現性高く比較する
+#     ための実験基盤としての拡張。
 #
-# 【キャッシュ判定】
-# - 入力CSVの更新時刻とファイルサイズに加えて、
-#   次の条件が一致した場合だけ計算結果を再利用する。
-#     ・クリック開始位置
-#     ・経路制約モード
-#     ・方位推定方法
-#     ・地図上の初期方位
-#     ・初期方位校正に使用するサンプル数
-#     ・route_points
-#     ・経路方位補正の重み
-#     ・経路外粒子の重み
-# - 開始位置や実行条件を変更した後に、
-#  以前の条件で計算した結果が誤って再利用されることを防止する。
-#
-# 【結果グラフ】
-# - 各CSVの推定軌跡を異なる色で表示する。
-# - 開始位置は、対応する軌跡と同じ色の点で表示する。
-# - 開始位置の点には白い縁を付け、軌跡との区別をしやすくする。
-# - 凡例はCSV名ごとに1項目とし、軌跡と開始点の重複表示を防ぐ。
-# - グラフタイトルへ経路制約モードと方位推定方法を表示する。
-# - 保存された画像だけを見ても実行条件を判別できるようにする。
-#
-# 【test11_gemini.pyからの主な変更点】
-# 1. 歩行者の移動様態をSTOPPED、STRAIGHT、TURNINGの3状態で判定する。
-# 2. 移動様態に応じてパーティクル数を動的に変更する。
-# 3. 移動様態に応じて歩幅ノイズと方位ノイズを変更する。
-# 4. 曲がり判定に方位変化とヨーレートを併用する。
-# 5. TURNING判定にヒステリシスを導入する。
-# 6. パーティクル増減時に重みに従って再サンプリングする。
-# 7. パーティクル増加時に微小な位置摂動を加える。
-# 8. リサンプリングと全滅復帰を可変パーティクル数へ対応させる。
-# 9. CSVごとに移動様態、粒子数、全滅回数、PF診断値を出力する。
-# 10. CSVごとの既知開始位置を地図クリックで登録して再利用する。
-# 11. 初期方位を地図座標系へ合わせる。
-# 12. ジャイロ方位とAndroid方位を切り替えて比較できるようにする。
-# 13. 手動経路の使用方法をnone、prefer、enforceへ分離する。
-#
-# 【主な実行例】
-#
-# 経路制約なし、ジャイロ方位、右方向から開始:
-# python pdr_pf_improved.py \
-#   --route-constraint-mode none \
-#   --heading-source gyro \
-#   --initial-heading-deg 0 \
-#   --no-watch \
-#   --seed 42 \
-#   --save result_none_gyro.png
-#
-# 経路制約なし、Android方位、右方向から開始:
-# python pdr_pf_improved.py \
-#   --route-constraint-mode none \
-#   --heading-source android \
-#   --initial-heading-deg 0 \
-#   --heading-calibration-samples 30 \
-#   --no-watch \
-#   --seed 42 \
-#   --save result_none_android.png
-#
-# 経路優先、ジャイロ方位、右方向から開始:
-# python pdr_pf_improved.py \
-#   --route-constraint-mode prefer \
-#   --heading-source gyro \
-#   --initial-heading-deg 0 \
-#   --no-watch \
-#   --seed 42 \
-#   --save result_prefer_gyro.png
-#
-# 経路強制、ジャイロ方位、右方向から開始:
-# python pdr_pf_improved.py \
-#   --route-constraint-mode enforce \
-#   --heading-source gyro \
-#   --initial-heading-deg 0 \
-#   --no-watch \
-#   --seed 42 \
-#   --save result_enforce_gyro.png
-#
-# 【注意】
-# - 論文では直進10個、屈折20個としているが、
-#   本プログラムでは複雑な地図に対応するため、
-#   同程度の比率を保ちながらJSONで直進250個、曲がり600個に設定している。
-# - 各パラメータはmap_configs/kanri_4f.jsonの
-#   adaptive_pfセクションで変更できる。
-# - --heading-source androidを使用する場合は、
-#   入力CSVにyaw_deg列が必要である。
-# - 初期方位を安定して取得するため、AndroidアプリでSTARTを押した後は、
-#   短時間静止してから歩き始めることが望ましい。
-# - 現在の--initial-heading-degは1回の実行で全CSVへ共通に適用される。
-# - 開始方向が異なるCSVは、開始方向ごとに分けて実行する必要がある。
-# - 現在の二値地図では、廊下と部屋が同じ移動可能領域として
-#   扱われる場合がある。
-# - noneモードでは、部屋への誤進入や誤った通路選択が
-#   発生する可能性がある。
-# - preferとenforceは手動route_pointsを使用するため、
-#   本研究の最終提案方式ではなく比較方式として扱う。
-# - 軌跡画像が正解経路に近く見えることだけでは、
-#   位置推定精度の改善を証明できない。
-# - 平均位置誤差、RMSE、最終位置誤差、曲がり位置誤差を求めるには、
-#   正解位置または正解経路データが別途必要である。
-# - 今後は、廊下・部屋・ドアの領域分類、通路中心線の自動抽出、
-#   手動正解経路を使用しない複数経路推定を追加する必要がある。
+# 現状のroute_constraint_mode=prefer/enforceは正解に近い経路を手動入力した比較用
+# 方式(進捗メモでいう方式D相当)であり、本研究の最終提案方式そのものではない。
+# 手動経路への依存を減らすことが今後の課題(進捗メモ 4.1, 5.3, 20.2 を参照)。
 # ============================================================================
 
 import numpy as np
@@ -287,6 +150,9 @@ except Exception:
 BASE_DIR = Path(__file__).resolve().parent
 DEFAULT_MAP_CONFIG = BASE_DIR / "map_configs" / "kanri_4f.json"
 START_POSITION_FILE = BASE_DIR / "start_positions.csv"
+# 【本研究独自】--save未指定時に結果PNGを自動保存する既定フォルダ。
+# 卒業論文の証拠画像・実行ログとして毎回の実行結果を残すために使用する。
+RESULTS_DIR = BASE_DIR / "results"
 M_TO_PIXEL = None
 TARGET_DISTANCE_PX = None
 DEFAULT_STEP_GAIN = None
@@ -482,6 +348,8 @@ def select_start_position_on_map(file_name, map_image):
     return float(start_x), float(start_y)
 
 
+# [本研究独自(実験基盤)] 既知開始位置のクリック登録・再利用。複数CSV・複数試行を
+# 同じ開始位置条件で比較するための仕組み(start_positions.csvに永続化)。
 def get_or_select_start_position(file_name, map_image, pf_map, saved_positions):
     """保存済み位置を再利用し、未登録CSVだけ地図クリックを要求する。"""
     saved_position = saved_positions.get(file_name)
@@ -554,6 +422,7 @@ def safe_read_csv(file_path, max_retries=5, delay=0.2):
     raise IOError(f"ファイルの安全な読み込みに失敗しました: {file_path}")
 
 
+# [先行研究:移動様態PF] 秋山ほか(FIT2013)の直進/屈折/滞留の3様態区分を踏襲。
 class MoveBehavior(Enum):
     """歩行者の移動様態。"""
     STOPPED = "stopped"
@@ -561,6 +430,9 @@ class MoveBehavior(Enum):
     TURNING = "turning"
 
 
+# [先行研究:移動様態PF] 様態別に粒子数・ノイズ分散を変える考え方は秋山ほかに基づく。
+# 数値(直進250/曲がり600/滞留100)は原論文の直進10/屈折20から比率を保ちつつ、
+# 本研究の対象地図(管理棟4階、複雑な廊下形状)向けに拡大した [本研究独自] 調整値。
 def behavior_parameters(behavior):
     """移動様態に対応する粒子数・ノイズ分散を返す。"""
     if behavior == MoveBehavior.TURNING:
@@ -582,6 +454,9 @@ def behavior_parameters(behavior):
     }
 
 
+# [先行研究:移動様態PF]をベースに、[本研究独自]の外れ値対策(75パーセンタイル)・
+# AND条件・ヒステリシスを追加した屈折判定。原論文は「8秒間に30度以上変化したら
+# 屈折」という単純な閾値判定のみで、ヨーレートの併用やヒステリシスは持たない。
 def detect_move_behavior(
     timestamps,
     heading_history,
@@ -653,6 +528,11 @@ def detect_move_behavior(
 # ============================================================
 # 4. パーティクルフィルタのカプセル化クラス (OOP設計)
 # ============================================================
+# [先行研究:移動様態PF] 予測→重み計算→リサンプリングという基本枠組み、および
+# 様態別の粒子数・分散変更(configure_behavior)は秋山ほかの提案方式に基づく。
+# [本研究独自] 壁判定は原論文の0/1二値重みではなく、距離場(dist_map)による
+# 連続的な尤度重み付けに拡張している(update内のwall_weights計算)。さらに
+# route_mask(地図から抽出した経路帯)を用いた重み付けは両先行研究にない要素。
 class ParticleFilterPDR:
     """パーティクルフィルタの状態、重み更新、衝突判定、および
     リサンプリング処理を完全にカプセル化したクラス。
@@ -1068,6 +948,7 @@ def compute_acc_magnitude(df):
     return np.sqrt(df['acc_x']**2 + df['acc_y']**2 + df['acc_z']**2)
 
 
+# [SmartPDR] 重力成分をHPFで除去し、LPFで平滑化してステップ信号を作る前処理。
 def compute_step_acceleration(acc_mag: pd.Series):
     gravity = np.zeros(len(acc_mag))
     values = acc_mag.to_numpy()
@@ -1084,6 +965,7 @@ def compute_step_acceleration(acc_mag: pd.Series):
     ).mean()
 
 
+# [SmartPDR] ピーク・谷・傾き条件を用いたステップ検出(原論文のステップ検出手法)。
 def detect_steps_smartpdr(step_acc: pd.Series):
     values = step_acc.to_numpy()
     peaks, _ = find_peaks(
@@ -1129,7 +1011,7 @@ def detect_steps_smartpdr(step_acc: pd.Series):
 
 
 def estimate_step_length_px(acc_mag: pd.Series, center_idx: int, window: int = 10):
-    """Weinberg法による古典的な歩幅推定（予備または切り替え用）"""
+    """[SmartPDR] Weinberg法による古典的な歩幅推定（予備または切り替え用）"""
     start     = max(0, center_idx - window)
     end       = min(len(acc_mag), center_idx + window + 1)
     segment   = acc_mag.iloc[start:end]
@@ -1140,7 +1022,7 @@ def estimate_step_length_px(acc_mag: pd.Series, center_idx: int, window: int = 1
 
 
 def estimate_smartpdr_step_length_px(step_acc: pd.Series, peak_idx: int, valley_idx: int):
-    """SmartPDR論文に基づいた高度な歩幅推定"""
+    """[SmartPDR] 論文の4乗根式/対数式切り替えに基づいた歩幅推定"""
     impact = max(float(step_acc.iloc[peak_idx] - step_acc.iloc[valley_idx]), 1e-6)
     if impact < SMART_STEP_TAU:
         step_m = ROOT_BETA * (impact ** 0.25) + ROOT_GAMMA
@@ -1176,6 +1058,10 @@ def weighted_angle_mean(angles, weights):
     return np.arctan2(sin_sum, cos_sum)
 
 
+# [本研究独自] ここから先(route_guidance_enabled 〜 advance_route_segment)は、
+# 地図から抽出した通路方向情報(route_points)を用いて曲がり判定・方位補正を行う
+# 一連の処理。SmartPDR・移動様態適応PFのどちらにも地図の通路方向を使う処理は
+# 存在せず、本研究が「地図形状の利用」として追加した部分の中心にあたる。
 def route_guidance_enabled():
     return ROUTE_CONSTRAINT_MODE in {"prefer", "enforce"} and len(ROUTE_POINTS) >= 2
 
@@ -1319,6 +1205,8 @@ def load_preprocessed_map(img_path):
     return binary, binary_for_pf_local, dist_map
 
 
+# [本研究独自] 二値地図上にroute_pointsを描画して太らせた「経路帯マスク」を作る。
+# 経路優先/強制の重み付け(ParticleFilterPDR.update)や曲がり角近傍判定の土台。
 def build_route_mask(shape):
     mask = np.zeros(shape, dtype=bool)
     if not route_guidance_enabled():
@@ -1342,6 +1230,9 @@ redraw_requested = threading.Event()
 result_cache = PDRResultCache()
 
 
+# [本研究独自(実験基盤)] 複数CSV・複数試行を再現性高く比較するための
+# フォルダ監視・自動再描画の仕組み。SmartPDR・移動様態適応PFのどちらにも
+# 存在しない、本研究の実験運用のための拡張。
 # CSV 変更検出ハンドラ
 class CSVHandler(FileSystemEventHandler):
 
@@ -1719,21 +1610,30 @@ def redraw_all_paths():
     logging.info(f"Overall time: {end_overall - start_overall:.2f} seconds")
 
     ax.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
-    title = "移動様態・経路線分連動型PF + SmartPDR（管理棟）"
+    # 保存画像だけを見ても実行条件を判別できるよう、経路制約モードをタイトルへ表示する。
+    title = f"移動様態・経路線分連動型PF + SmartPDR（管理棟, 経路制約={ROUTE_CONSTRAINT_MODE}）"
     if japanize_matplotlib is None:
-        title = "Behavior and route-segment adaptive PF + SmartPDR"
+        title = f"Behavior and route-segment adaptive PF + SmartPDR (route={ROUTE_CONSTRAINT_MODE})"
     ax.set_title(title)
 
     fig.subplots_adjust(right=0.72)
     fig.canvas.draw()
     fig.canvas.flush_events()
 
+    # 【本研究独自】卒業論文の証拠画像・実行ログとして、実行のたびに必ず結果PNGを
+    # 保存する。--save指定時はそのパスへ、未指定時はRESULTS_DIR以下へ実行日時・
+    # 経路制約モード・乱数シードを含む名前で自動保存する(進捗メモ15章に対応)。
     if args.save is not None:
         save_path = args.save.resolve()
-        save_path.parent.mkdir(parents=True, exist_ok=True)
-        fig.set_size_inches(10, 8, forward=True)
-        fig.savefig(save_path, dpi=200, bbox_inches='tight')
-        logging.info(f"結果画像を保存しました: {save_path}")
+    else:
+        timestamp = time.strftime("%Y%m%d_%H%M%S")
+        seed_text = "none" if args.seed is None else str(args.seed)
+        auto_name = f"{timestamp}_route-{ROUTE_CONSTRAINT_MODE}_seed-{seed_text}.png"
+        save_path = (RESULTS_DIR / auto_name).resolve()
+    save_path.parent.mkdir(parents=True, exist_ok=True)
+    fig.set_size_inches(10, 8, forward=True)
+    fig.savefig(save_path, dpi=200, bbox_inches='tight')
+    logging.info(f"結果画像を保存しました: {save_path}")
 
 
 def main():
