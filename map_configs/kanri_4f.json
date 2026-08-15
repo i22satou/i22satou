@@ -14,8 +14,15 @@
   "route_corner_threshold_px": 25.0,
   "route_points": [
     [100.0,230.0],
-    [440.0,230.0],
-    [440.0,145.0]
+    [425.0,230.0],
+    [425.0,115.0],
+    [800.0,115.0]
+  ],
+  "exclude_csv": [
+    "pdr_log_0410_1535.csv",
+    "pdr_log_0414_0902.csv",
+    "pdr_log_0414_0940.csv",
+    "pdr_log_0624_14.csv"
   ],
   "adaptive_pf": {
   "particles_straight": 250,

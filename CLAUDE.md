@@ -25,6 +25,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
   `RESULTS_DIR`). Bring this same behavior to `pdr_pf_improved.py` before/while making other
   changes there, and don't reintroduce a code path where a run produces no image — these PNGs
   are the evidence trail for the thesis (see 進捗メモ §15, §21).
+- **CSVファイルを読み込む際は、必ずそのままのデータを使用すること。いかなる場合でも
+  `pdr_log_*.csv` や `start_positions.csv` など入力CSVファイルの中身を書き換えたり、
+  値を補正・間引き・並べ替え・削除したりしてはならない。** 前処理・フィルタリング・
+  補間などの変換はすべてプログラム内のメモリ上の処理として行い、読み込んだCSVファイル
+  自体には一切変更を加えないこと(`start_positions.csv`への新規開始位置の追記など、
+  プログラムの既存の意図された書き込み処理は例外とする)。これはIMUログが実験の生データ
+  であり、卒論の証拠資料としての完全性を保つ必要があるため。
 - **When you change the active script, add a new dated entry at the very top of its header
   changelog comment** (`# - YYYY-MM-DD: ...`, above the existing entries), describing what
   changed and why. This is the existing convention in both `pdr_pf_clickstart.py` and
@@ -32,6 +39,15 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
   the research process.
 - Convert relative dates the user gives you ("today", "先週") to absolute dates using the
   session's current date before writing them into changelog entries or filenames.
+- **Before making any change to the program, or when checking past history/decisions, consult
+  all three of**: this file (CLAUDE.md), `進捗反映版メモ.txt` (see "Progress memo" section
+  below), and [CLAUDE_MEMO.md](CLAUDE_MEMO.md) (a separate file in this same directory).
+  `CLAUDE_MEMO.md` records session-to-session investigation results and the *reasoning*
+  behind decisions (not just "what changed", which the `.py` changelog comments already
+  cover) — things like why a config value was set the way it is, or what was ruled out and
+  why. Add a new dated entry at the top of `CLAUDE_MEMO.md` (same convention as the `.py`
+  changelog: newest first) whenever you finish an investigation or make a non-trivial
+  decision, so the next session doesn't have to re-derive it.
 
 ## Project overview
 
@@ -55,7 +71,7 @@ what came from them versus what this research adds. `pdr_pf_clickstart.py`'s hea
 - **`[SmartPDR]`** — *SmartPDR: Smartphone-Based Pedestrian Dead Reckoning for Indoor
   Localization*. Basis for the HPF/LPF step-acceleration signal, peak/valley/slope step
   detection (`detect_steps_smartpdr`), and the 4th-root/log step-length formula
-  (`estimate_smartpdr_step_length_px`, `WEINBERG_K`/`ROOT_BETA`/`ROOT_GAMMA`/`LOG_BETA`/`LOG_GAMMA`).
+  (`estimate_smartpdr_step_length_px`, `ROOT_BETA`/`ROOT_GAMMA`/`LOG_BETA`/`LOG_GAMMA`).
 - **`[先行研究:移動様態PF]`** — 秋山高行ほか「移動様態に応じたパーティクルフィルタによる
   歩行者自律測位方式の提案と評価」(FIT2013). Basis for classifying steps into
   直進/屈折/滞留 (`MoveBehavior`) and varying particle count + noise variance per state
@@ -108,6 +124,13 @@ progress table rather than guessing status from the code alone — several "impl
 mechanisms (e.g. Neff, position variance) are computed but not yet *used* anywhere (flagged
 【一部完了】), which the memo makes explicit and the code alone does not.
 
+## Claude Codeメモ
+
+セッションをまたいだ調査結果・意思決定の理由は、この節ではなく別ファイル
+[CLAUDE_MEMO.md](CLAUDE_MEMO.md) に記録する(「何を変えたか」は各`.py`の変更履歴
+コメント、「なぜそう判断したか」は`CLAUDE_MEMO.md`、という役割分担)。参照・追記の
+ルールは上の「Project policy」節を参照。
+
 ## Running the code
 
 Core third-party dependencies (install via pip, no pinned versions in-repo):
@@ -157,35 +180,42 @@ kept in sync:
 - `pdr_pf_improved.py` — **the active script as of 2026-08-15** (see Project policy above);
   implement new work here. It's the more feature-complete branch (initial-heading calibration,
   selectable heading source `gyro`/`android`, PF diagnostic logging, route-segment
-  auto-selection from click position), but it does **not** yet have `pdr_pf_clickstart.py`'s
-  auto-save-PNG behavior, changelog convention, or `[SmartPDR]`/`[先行研究:移動様態PF]`/
-  `[本研究独自]` origin tags — port those over rather than assuming they're already there.
-  It also has the config-loading and `enforce`-mode gaps described below.
-- `pdr_pf_clickstart.py` — the previously-active script; kept as reference for its
-  auto-save-PNG behavior, changelog convention, and origin tags (all described below), but no
-  longer the target for new changes unless the user says otherwise.
+  auto-selection from click position). As of 2026-08-15 it has been brought to parity with
+  `pdr_pf_clickstart.py` on auto-save-PNG behavior, changelog convention, and
+  `[SmartPDR]`/`[先行研究:移動様態PF]`/`[本研究独自]` origin tags (see
+  [CLAUDE_MEMO.md](CLAUDE_MEMO.md) and the file's own changelog for what changed); the
+  `enforce`-mode and config-loading
+  gaps described below have also been narrowed — check the current bullets, not just this
+  summary, before assuming either script's behavior.
+- `pdr_pf_clickstart.py` — the previously-active script; kept as reference, but no longer the
+  target for new changes unless the user says otherwise.
 - `adaptive_behavior_particle_filter_pdr_route_fixed.py` — an earlier "fixed" iteration.
 
 **Before changing PF/heading/route logic, check which of these three files the user means**
 — a fix applied to one will not appear in the others, and their in-file changelog comments
 at the top of each file are the best record of what has already diverged. A few concrete
 divergences worth knowing before touching `enforce` mode or config loading:
-- `pdr_pf_clickstart.py`'s `apply_map_config()` uses `require_config_value()` and raises if a
-  key is missing from the map config JSON; `pdr_pf_improved.py`'s `apply_map_config()` uses
-  `config.get(key, default)` and silently falls back to old hardcoded defaults instead —
-  despite its own header comment claiming missing-config-is-an-error. Don't assume that claim
-  is true for `pdr_pf_improved.py` without checking the actual code.
+- Both scripts' `apply_map_config()` now use `require_config_value()` and raise if a required
+  key is missing from the map config JSON (`pdr_pf_improved.py` was fixed on 2026-08-15 — it
+  used to silently fall back to hardcoded defaults via `config.get(key, default)`, contradicting
+  its own header comment; that contradiction is resolved now).
 - `pdr_pf_clickstart.py`'s `ParticleFilterPDR.is_in_wall()` treats off-route pixels as walls
-  when `route_constraint_mode == "enforce"`; `pdr_pf_improved.py`'s `is_in_wall()` does not
-  check `route_mask` at all in `enforce` mode (only the separate weight term zeroes off-route
-  particles, and the all-particles-extinct recovery path ignores `route_mask` entirely) — so
-  `enforce` mode is not equivalent between the two files.
+  when `route_constraint_mode == "enforce"` (a hard constraint enforced every step, including
+  inside `path_hits_wall()`). `pdr_pf_improved.py`'s `is_in_wall()` deliberately does **not**
+  check `route_mask` — off-route particles are zeroed via the weight term each step instead
+  (numerically equivalent in the common case where at least one particle stays on-route). This
+  is an intentional, narrower fix, not full parity: as of 2026-08-15 the all-particles-extinct
+  recovery path *does* respect `route_mask` in `enforce` mode (previously it didn't, letting
+  the particle cloud leak into off-route rooms after a collapse and stay there) — see
+  [CLAUDE_MEMO.md](CLAUDE_MEMO.md) for why the narrower fix (recovery-only) was chosen over
+  full parity.
 - `pdr_pf_improved.py`'s `estimate_initial_sensor_heading()` raises `ValueError` when
-  `--heading-source android` is used against a CSV without a `yaw_deg` column, and this is
-  **not** caught anywhere in `redraw_all_paths()`'s per-file loop — it aborts the whole batch.
-  The real `data_dir` configured in `map_configs/kanri_4f.json` has a mix of old CSVs
+  `--heading-source android` is used against a CSV without a `yaw_deg` column. As of
+  2026-08-15 this is caught in `redraw_all_paths()`'s per-file loop (the offending CSV is
+  skipped with a warning; the batch continues) — it no longer aborts the whole batch. The real
+  `data_dir` configured in `map_configs/kanri_4f.json` still has a mix of old CSVs
   (`pdr_log_0410_*`, `_0414_*`, `_0624_*`) without `yaw_deg` and newer ones (`_0805_*`) with
-  it, so running `--heading-source android` against that directory as-is will hit this.
+  it, so `--heading-source android` against that directory will still skip the old ones.
 
 ### Common pipeline (in the three main scripts)
 
@@ -206,7 +236,7 @@ divergences worth knowing before touching `enforce` mode or config loading:
    `save_start_position()`.
 5. Signal processing per CSV: `validate_log()` checks required IMU columns
    (`timestamp, acc_x/y/z, gyro_x/y/z`) → step detection/step-length estimation `[SmartPDR]`
-   (`detect_steps_smartpdr`, `estimate_smartpdr_step_length_px`, `WEINBERG_K`) →
+   (`detect_steps_smartpdr`, `estimate_smartpdr_step_length_px`) →
    heading fusion (gyro + accel via Madgwick from the `ahrs` package, optional magnetometer,
    optional Android `yaw_deg` rotation-vector source in the `_improved` variant).
 6. `detect_move_behavior()` classifies each step as `MoveBehavior.STOPPED / STRAIGHT /
