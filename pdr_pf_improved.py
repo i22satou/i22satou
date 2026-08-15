@@ -2,6 +2,37 @@
 # pdr_pf_improved.py
 #
 # 【変更履歴】
+# - 2026-08-15: 未使用コードを削除しファイル総行数を縮小。
+#               (1) 未使用import(dataclass)を削除。
+#               (2) 呼び出し箇所が一つもなかったestimate_step_length_px()
+#                   (Weinberg法の予備実装)とWEINBERG_K定数を削除。
+#               (3) START_X/START_Y(JSON任意設定"start"由来)を削除。実際の
+#                   PF開始位置はstart_positions.csv/クリック選択で決まっており
+#                   一切影響していなかった上、ログに実態と異なる開始位置を
+#                   出力していたため。
+# - 2026-08-15: 地図設定JSONに任意設定"exclude_csv"を追加。別の図(L字経路用など)で
+#               使用中のCSVをファイル名指定でこのJSONの実行対象から除外できるように
+#               した(redraw_all_paths()のファイル一覧構築時にフィルタ)。
+# - 2026-08-15: CLAUDE.mdで指摘されていたpdr_pf_clickstart.pyとの残る差分を解消。
+#               (1) --save未指定時にPNGが1枚も保存されない問題を修正し、
+#                   pdr_pf_clickstart.py同様resultsディレクトリへ実行日時・
+#                   経路制約モード・乱数シードを含む名前で自動保存するようにした。
+#               (2) apply_map_config()がconfig.get(key, 旧デフォルト値)で
+#                   設定漏れを黙って握り潰していた(ヘッダーの「設定漏れはエラー」
+#                   という記述と矛盾)問題を、require_config_value()による必須
+#                   チェックへ統一して解消(pdr_pf_clickstart.py同様の挙動)。
+#               (3) --heading-source androidをyaw_deg列の無いCSVに使った際の
+#                   ValueErrorがredraw_all_paths()のループ外まで伝播し、
+#                   以降のCSVを1枚も処理できずバッチ全体が止まっていた問題を、
+#                   該当ファイルだけスキップするtry/exceptで解消。
+#               (4) [SmartPDR]/[先行研究:移動様態PF]/[本研究独自]の出典タグと、
+#                   研究的位置づけの説明コメントをpdr_pf_clickstart.pyから移植。
+# - 2026-08-15: route_constraint_mode=enforceで全粒子の重みが0になった際の
+#               自己リカバリ処理に経路マスク条件を追加。従来はbinary_for_pf
+#               (物理壁)のみを条件に再配置していたため、全滅からの回復時に
+#               粒子群が経路コリドー外(隣室など)へ漏れ出す場合があった
+#               (is_in_wall()自体は経路を見ない設計のまま据え置き、
+#               診断指標valid_ratio_history/route_ratio_historyの分離も維持)。
 # - 2026-08-05: CSVごとの既知開始位置を地図クリックで登録し、
 #               start_positions.csvから再利用する機能を追加。
 # - 2026-08-06: JSONで管理する地図・PF設定値をコード先頭の固定値から削除し、
@@ -224,6 +255,49 @@
 #   正解位置または正解経路データが別途必要である。
 # - 今後は、廊下・部屋・ドアの領域分類、通路中心線の自動抽出、
 #   手動正解経路を使用しない複数経路推定を追加する必要がある。
+#
+# 【本プログラムの研究的位置づけ(卒業論文 第2章・第5章の執筆用メモ)】
+# 本プログラムは以下2件の先行研究を基礎とし、そこに本研究独自の拡張を加えている。
+# 該当処理の直前コメントに [SmartPDR] [先行研究:移動様態PF] [本研究独自] のタグを
+# 付け、どの処理がどちらに由来するかをコード上でも追跡できるようにしている。
+#
+# 参考文献1: SmartPDR: Smartphone-Based Pedestrian Dead Reckoning for Indoor
+#            Localization
+#   - 加速度のHPF/LPFによるステップ信号生成、ピーク・谷・傾き条件によるステップ
+#     検出(detect_steps_smartpdr)、4乗根式/対数式を切り替える歩幅推定式
+#     (estimate_smartpdr_step_length_px)の基礎として使用。
+#
+# 参考文献2: 秋山高行ほか「移動様態に応じたパーティクルフィルタによる歩行者自律
+#            測位方式の提案と評価」(FIT2013)
+#   - 歩行者の移動様態(直進/屈折/滞留)を判定し、様態ごとにパーティクル数・歩幅と
+#     方位のノイズ分散を変更するという考え方の基礎として使用
+#     (behavior_parameters, detect_move_behavior)。
+#   - 原論文は8秒間に30度以上変化した場合に屈折と判定する単純な閾値判定、粒子数は
+#     直進10個・屈折20個、壁判定は通過0/移動可1の二値重みである。
+#
+# 本研究独自の拡張(上記2件のどちらにも存在しない要素):
+#   - 壁までの距離場(distance_transform_edt)に基づく連続的な尤度重み付け。
+#     原論文の0/1二値重みに対する拡張(ParticleFilterPDR.update)。
+#   - ヨーレート75パーセンタイル・AND条件での屈折開始判定・ヒステリシスによる
+#     STRAIGHT/TURNINGの頻繁な振動抑制(detect_move_behavior)。原論文は単純な
+#     角度変化閾値のみで、ヨーレートの外れ値対策やヒステリシスは持たない。
+#   - 二値地図から抽出したroute_pointsによる経路帯マスク・曲がり角近傍判定・
+#     経路線分に連動した方位補正(route_constraint_mode, build_route_mask,
+#     correct_heading_with_route_segment, advance_route_segment,
+#     is_near_route_corner)。両先行研究には地図の通路方向情報を用いる処理は
+#     存在せず、本研究が追加した「地図形状を用いた適応制御」の中心部分にあたる。
+#   - 地図規模に合わせた適応的パーティクル数(直進250・曲がり600・滞留100)と、
+#     重みに基づくリサンプリングでの粒子数増減(resize_particle_set)。
+#   - 既知開始位置のクリック登録・再利用(start_positions.csv)、CSVフォルダ監視
+#     による自動再描画(CSVHandler)など、複数経路・複数試行を再現性高く比較する
+#     ための実験基盤としての拡張。
+#   - 初期方位のセンサ→地図座標系への校正、方位推定方法(gyro/android)の選択、
+#     クリック開始位置に最も近い経路線分を初期線分として選ぶ処理など、
+#     pdr_pf_clickstart.pyには無い本ファイル固有の拡張(詳細は上部の変更履歴)。
+#
+# 現状のroute_constraint_mode=prefer/enforceは正解に近い経路を手動入力した比較用
+# 方式(進捗メモでいう方式D相当)であり、本研究の最終提案方式そのものではない。
+# 手動経路への依存を減らすことが今後の課題(進捗メモ 4.1, 5.3, 20.2 を参照)。
 # ============================================================================
 
 import numpy as np
@@ -238,7 +312,6 @@ import argparse
 import threading
 import glob
 from pathlib import Path
-from dataclasses import dataclass
 from enum import Enum
 
 # Ensure matplotlib config directory is writable and not hardcoded
@@ -288,12 +361,11 @@ except Exception:
 BASE_DIR = Path(__file__).resolve().parent
 DEFAULT_MAP_CONFIG = BASE_DIR / "map_configs" / "kanri_4f.json"
 START_POSITION_FILE = BASE_DIR / "start_positions.csv"
+RESULTS_DIR = BASE_DIR / "results"
 M_TO_PIXEL = 11.4
 TARGET_DISTANCE_PX = None
 DEFAULT_STEP_GAIN = 1.0
 PF_EROSION_RADIUS_PX = 1
-START_X = 250.0
-START_Y = 230.0
 
 # PF重み・経路優先設定
 WALL_WEIGHT_SIGMA = 0.60
@@ -305,6 +377,9 @@ ROUTE_CORNER_THRESHOLD_PX = 25.0
 ROUTE_CONSTRAINT_MODE = "prefer"
 ROUTE_POINTS = []
 GYRO_UNIT = "rad"
+# 別の図(L字経路用など)で使用しており、このJSONの実行対象からは除外したいCSVファイル名。
+# map_configs/*.jsonの"exclude_csv"(任意設定)から読み込む。ファイル名の完全一致で判定する。
+EXCLUDED_CSV_NAMES = set()
 
 # ============================================================
 # 2. パーティクルフィルタのパラメータ
@@ -330,7 +405,6 @@ PARTICLE_RESIZE_JITTER_PX = 0.50
 
 STEP_MIN_INTERVAL = 5
 
-WEINBERG_K = 0.35
 MIN_STEP_M = 0.25
 MAX_STEP_M = 1.00
 
@@ -564,6 +638,7 @@ def safe_read_csv(file_path, max_retries=5, delay=0.2):
     raise IOError(f"ファイルの安全な読み込みに失敗しました: {file_path}")
 
 
+# [先行研究:移動様態PF] 秋山ほか(FIT2013)の直進/屈折/滞留の3様態区分を踏襲。
 class MoveBehavior(Enum):
     """歩行者の移動様態。"""
     STOPPED = "stopped"
@@ -571,6 +646,9 @@ class MoveBehavior(Enum):
     TURNING = "turning"
 
 
+# [先行研究:移動様態PF] 様態別に粒子数・ノイズ分散を変える考え方は秋山ほかに基づく。
+# 数値(直進250/曲がり600/滞留100)は原論文の直進10/屈折20から比率を保ちつつ、
+# 本研究の対象地図(管理棟4階、複雑な廊下形状)向けに拡大した [本研究独自] 調整値。
 def behavior_parameters(behavior):
     """移動様態に対応する粒子数・ノイズ分散を返す。"""
     if behavior == MoveBehavior.TURNING:
@@ -592,6 +670,9 @@ def behavior_parameters(behavior):
     }
 
 
+# [先行研究:移動様態PF]をベースに、[本研究独自]の外れ値対策(75パーセンタイル)・
+# AND条件・ヒステリシスを追加した屈折判定。原論文は「8秒間に30度以上変化したら
+# 屈折」という単純な閾値判定のみで、ヨーレートの併用やヒステリシスは持たない。
 def detect_move_behavior(
     timestamps,
     heading_history,
@@ -663,6 +744,11 @@ def detect_move_behavior(
 # ============================================================
 # 4. パーティクルフィルタのカプセル化クラス (OOP設計)
 # ============================================================
+# [先行研究:移動様態PF] 予測→重み計算→リサンプリングという基本枠組み、および
+# 様態別の粒子数・分散変更(configure_behavior)は秋山ほかの提案方式に基づく。
+# [本研究独自] 壁判定は原論文の0/1二値重みではなく、距離場(dist_map)による
+# 連続的な尤度重み付けに拡張している(update内のwall_weights計算)。さらに
+# route_mask(地図から抽出した経路帯)を用いた重み付けは両先行研究にない要素。
 class ParticleFilterPDR:
     """パーティクルフィルタの状態、重み更新、衝突判定、および
     リサンプリング処理を完全にカプセル化したクラス。
@@ -859,6 +945,8 @@ class ParticleFilterPDR:
                 nx_i = np.clip(np.round(new_x).astype(int), 0, self.w - 1)
                 ny_i = np.clip(np.round(new_y).astype(int), 0, self.h - 1)
                 valid = self.binary_for_pf[ny_i, nx_i] == 255
+                if ROUTE_CONSTRAINT_MODE == "enforce":
+                    valid &= self.route_mask[ny_i, nx_i]
                 if valid.sum() > self.n_particles // 4:
                     valid_idx = np.where(valid)[0]
                     invalid_idx = np.where(~valid)[0]
@@ -1014,12 +1102,18 @@ def load_map_config(config_path):
     return config, config_path
 
 
+def require_config_value(mapping, key, source_name):
+    if key not in mapping:
+        raise ValueError(f"{source_name} に必須設定 '{key}' がありません。")
+    return mapping[key]
+
+
 def apply_map_config(args, config, config_path):
     global M_TO_PIXEL, TARGET_DISTANCE_PX, DEFAULT_STEP_GAIN
-    global START_X, START_Y, PF_EROSION_RADIUS_PX
+    global PF_EROSION_RADIUS_PX
     global WALL_WEIGHT_SIGMA, WALL_WEIGHT_FLOOR, OFF_ROUTE_WEIGHT
     global ROUTE_WIDTH_PX, ROUTE_HEADING_WEIGHT, ROUTE_CORNER_THRESHOLD_PX
-    global ROUTE_CONSTRAINT_MODE, ROUTE_POINTS, GYRO_UNIT
+    global ROUTE_CONSTRAINT_MODE, ROUTE_POINTS, GYRO_UNIT, EXCLUDED_CSV_NAMES
     global N_PARTICLES_STRAIGHT, N_PARTICLES_TURNING, N_PARTICLES_STOPPED
     global SIGMA_STEP_STRAIGHT, SIGMA_STEP_TURNING, SIGMA_STEP_STOPPED
     global SIGMA_ANGLE_STRAIGHT, SIGMA_ANGLE_TURNING, SIGMA_ANGLE_STOPPED
@@ -1027,19 +1121,20 @@ def apply_map_config(args, config, config_path):
     global TURN_YAW_RATE_THRESHOLD, PARTICLE_RESIZE_JITTER_PX
 
     config_dir = config_path.parent
-    M_TO_PIXEL = float(config.get("scale_px_per_m", M_TO_PIXEL))
+    config_name = str(config_path)
+    M_TO_PIXEL = float(require_config_value(config, "scale_px_per_m", config_name))
     target = config.get("target_distance_px")
     TARGET_DISTANCE_PX = None if target is None else float(target)
-    DEFAULT_STEP_GAIN = float(config.get("step_gain", DEFAULT_STEP_GAIN))
-    PF_EROSION_RADIUS_PX = int(config.get("pf_erosion_radius_px", PF_EROSION_RADIUS_PX))
-    WALL_WEIGHT_SIGMA = float(config.get("wall_weight_sigma", WALL_WEIGHT_SIGMA))
-    WALL_WEIGHT_FLOOR = float(config.get("wall_weight_floor", WALL_WEIGHT_FLOOR))
-    OFF_ROUTE_WEIGHT = float(config.get("off_route_weight", OFF_ROUTE_WEIGHT))
-    ROUTE_WIDTH_PX = float(config.get("route_width_px", ROUTE_WIDTH_PX))
-    ROUTE_HEADING_WEIGHT = float(config.get("route_heading_weight", ROUTE_HEADING_WEIGHT))
-    ROUTE_CORNER_THRESHOLD_PX = float(config.get("route_corner_threshold_px", ROUTE_CORNER_THRESHOLD_PX))
+    DEFAULT_STEP_GAIN = float(require_config_value(config, "step_gain", config_name))
+    PF_EROSION_RADIUS_PX = int(require_config_value(config, "pf_erosion_radius_px", config_name))
+    WALL_WEIGHT_SIGMA = float(require_config_value(config, "wall_weight_sigma", config_name))
+    WALL_WEIGHT_FLOOR = float(require_config_value(config, "wall_weight_floor", config_name))
+    OFF_ROUTE_WEIGHT = float(require_config_value(config, "off_route_weight", config_name))
+    ROUTE_WIDTH_PX = float(require_config_value(config, "route_width_px", config_name))
+    ROUTE_HEADING_WEIGHT = float(require_config_value(config, "route_heading_weight", config_name))
+    ROUTE_CORNER_THRESHOLD_PX = float(require_config_value(config, "route_corner_threshold_px", config_name))
     configured_route_mode = str(
-        config.get("route_constraint_mode", ROUTE_CONSTRAINT_MODE)
+        require_config_value(config, "route_constraint_mode", config_name)
     ).lower()
     ROUTE_CONSTRAINT_MODE = (
         args.route_constraint_mode
@@ -1050,30 +1145,31 @@ def apply_map_config(args, config, config_path):
         raise ValueError(
             "route_constraint_modeはnone、prefer、enforceのいずれかです。"
         )
-    ROUTE_POINTS = [tuple(map(float, point)) for point in config.get("route_points", [])]
-    GYRO_UNIT = str(config.get("gyro_unit", GYRO_UNIT)).lower()
+    route_points = require_config_value(config, "route_points", config_name)
+    ROUTE_POINTS = [tuple(map(float, point)) for point in route_points]
+    GYRO_UNIT = str(require_config_value(config, "gyro_unit", config_name)).lower()
     if GYRO_UNIT not in {"rad", "deg"}:
         raise ValueError("gyro_unit は 'rad' または 'deg' を指定してください。")
+    # exclude_csvは任意設定(無ければ除外なし)。別の図で使用中など、このJSONでの
+    # 実行対象から外したいCSVファイル名(拡張子込み、完全一致)を列挙する。
+    EXCLUDED_CSV_NAMES = set(config.get("exclude_csv", []))
 
-    adaptive = config.get("adaptive_pf", {})
-    N_PARTICLES_STRAIGHT = int(adaptive.get("particles_straight", N_PARTICLES_STRAIGHT))
-    N_PARTICLES_TURNING = int(adaptive.get("particles_turning", N_PARTICLES_TURNING))
-    N_PARTICLES_STOPPED = int(adaptive.get("particles_stopped", N_PARTICLES_STOPPED))
-    SIGMA_STEP_STRAIGHT = float(adaptive.get("sigma_step_straight_px", SIGMA_STEP_STRAIGHT))
-    SIGMA_STEP_TURNING = float(adaptive.get("sigma_step_turning_px", SIGMA_STEP_TURNING))
-    SIGMA_STEP_STOPPED = float(adaptive.get("sigma_step_stopped_px", SIGMA_STEP_STOPPED))
-    SIGMA_ANGLE_STRAIGHT = np.deg2rad(float(adaptive.get("sigma_angle_straight_deg", np.rad2deg(SIGMA_ANGLE_STRAIGHT))))
-    SIGMA_ANGLE_TURNING = np.deg2rad(float(adaptive.get("sigma_angle_turning_deg", np.rad2deg(SIGMA_ANGLE_TURNING))))
-    SIGMA_ANGLE_STOPPED = np.deg2rad(float(adaptive.get("sigma_angle_stopped_deg", np.rad2deg(SIGMA_ANGLE_STOPPED))))
-    BEHAVIOR_WINDOW_SEC = float(adaptive.get("behavior_window_sec", BEHAVIOR_WINDOW_SEC))
-    TURN_ENTER_THRESHOLD = np.deg2rad(float(adaptive.get("turn_enter_threshold_deg", np.rad2deg(TURN_ENTER_THRESHOLD))))
-    TURN_EXIT_THRESHOLD = np.deg2rad(float(adaptive.get("turn_exit_threshold_deg", np.rad2deg(TURN_EXIT_THRESHOLD))))
-    TURN_YAW_RATE_THRESHOLD = np.deg2rad(float(adaptive.get("turn_yaw_rate_threshold_deg_s", np.rad2deg(TURN_YAW_RATE_THRESHOLD))))
-    PARTICLE_RESIZE_JITTER_PX = float(adaptive.get("particle_resize_jitter_px", PARTICLE_RESIZE_JITTER_PX))
-
-    start = config.get("start", {})
-    START_X = float(start.get("x", START_X))
-    START_Y = float(start.get("y", START_Y))
+    adaptive = require_config_value(config, "adaptive_pf", config_name)
+    adaptive_name = f"{config_name}:adaptive_pf"
+    N_PARTICLES_STRAIGHT = int(require_config_value(adaptive, "particles_straight", adaptive_name))
+    N_PARTICLES_TURNING = int(require_config_value(adaptive, "particles_turning", adaptive_name))
+    N_PARTICLES_STOPPED = int(require_config_value(adaptive, "particles_stopped", adaptive_name))
+    SIGMA_STEP_STRAIGHT = float(require_config_value(adaptive, "sigma_step_straight_px", adaptive_name))
+    SIGMA_STEP_TURNING = float(require_config_value(adaptive, "sigma_step_turning_px", adaptive_name))
+    SIGMA_STEP_STOPPED = float(require_config_value(adaptive, "sigma_step_stopped_px", adaptive_name))
+    SIGMA_ANGLE_STRAIGHT = np.deg2rad(float(require_config_value(adaptive, "sigma_angle_straight_deg", adaptive_name)))
+    SIGMA_ANGLE_TURNING = np.deg2rad(float(require_config_value(adaptive, "sigma_angle_turning_deg", adaptive_name)))
+    SIGMA_ANGLE_STOPPED = np.deg2rad(float(require_config_value(adaptive, "sigma_angle_stopped_deg", adaptive_name)))
+    BEHAVIOR_WINDOW_SEC = float(require_config_value(adaptive, "behavior_window_sec", adaptive_name))
+    TURN_ENTER_THRESHOLD = np.deg2rad(float(require_config_value(adaptive, "turn_enter_threshold_deg", adaptive_name)))
+    TURN_EXIT_THRESHOLD = np.deg2rad(float(require_config_value(adaptive, "turn_exit_threshold_deg", adaptive_name)))
+    TURN_YAW_RATE_THRESHOLD = np.deg2rad(float(require_config_value(adaptive, "turn_yaw_rate_threshold_deg_s", adaptive_name)))
+    PARTICLE_RESIZE_JITTER_PX = float(require_config_value(adaptive, "particle_resize_jitter_px", adaptive_name))
 
     data_dir = (resolve_config_value_path(config.get("data_dir"), config_dir)
                 if args.data_dir is None else args.data_dir.expanduser().resolve())
@@ -1095,7 +1191,6 @@ def apply_map_config(args, config, config_path):
     logging.info(f"地図設定JSON: {config_path}")
     logging.info(f"使用地図: {args.map}")
     logging.info(f"CSVフォルダ: {args.data_dir}")
-    logging.info(f"開始位置: x={START_X:.1f}, y={START_Y:.1f}")
     logging.info(f"縮尺: {M_TO_PIXEL:.2f} px/m")
     logging.info(f"ジャイロ単位: {GYRO_UNIT}/s")
     logging.info(f"PF収縮半径: {PF_EROSION_RADIUS_PX}px")
@@ -1112,6 +1207,7 @@ def compute_acc_magnitude(df):
     return np.sqrt(df['acc_x']**2 + df['acc_y']**2 + df['acc_z']**2)
 
 
+# [SmartPDR] 重力成分をHPFで除去し、LPFで平滑化してステップ信号を作る前処理。
 def compute_step_acceleration(acc_mag: pd.Series):
     gravity = np.zeros(len(acc_mag))
     values = acc_mag.to_numpy()
@@ -1128,6 +1224,7 @@ def compute_step_acceleration(acc_mag: pd.Series):
     ).mean()
 
 
+# [SmartPDR] ピーク・谷・傾き条件を用いたステップ検出(原論文のステップ検出手法)。
 def detect_steps_smartpdr(step_acc: pd.Series):
     values = step_acc.to_numpy()
     peaks, _ = find_peaks(
@@ -1172,19 +1269,8 @@ def detect_steps_smartpdr(step_acc: pd.Series):
     return np.array(valid_peaks, dtype=int), np.array(valley_indices, dtype=int)
 
 
-def estimate_step_length_px(acc_mag: pd.Series, center_idx: int, window: int = 10):
-    """Weinberg法による古典的な歩幅推定（予備または切り替え用）"""
-    start     = max(0, center_idx - window)
-    end       = min(len(acc_mag), center_idx + window + 1)
-    segment   = acc_mag.iloc[start:end]
-    amplitude = max(segment.max() - segment.min(), 1e-6)
-    step_m    = WEINBERG_K * (amplitude ** 0.25)
-    step_m    = np.clip(step_m, MIN_STEP_M, MAX_STEP_M)
-    return step_m * M_TO_PIXEL
-
-
 def estimate_smartpdr_step_length_px(step_acc: pd.Series, peak_idx: int, valley_idx: int):
-    """SmartPDR論文に基づいた高度な歩幅推定"""
+    """[SmartPDR] 論文の4乗根式/対数式切り替えに基づいた歩幅推定"""
     impact = max(float(step_acc.iloc[peak_idx] - step_acc.iloc[valley_idx]), 1e-6)
     if impact < SMART_STEP_TAU:
         step_m = ROOT_BETA * (impact ** 0.25) + ROOT_GAMMA
@@ -1220,6 +1306,10 @@ def weighted_angle_mean(angles, weights):
     return np.arctan2(sin_sum, cos_sum)
 
 
+# [本研究独自] ここから先(route_guidance_enabled 〜 advance_route_segment)は、
+# 地図から抽出した通路方向情報(route_points)を用いて曲がり判定・方位補正を行う
+# 一連の処理。SmartPDR・移動様態適応PFのどちらにも地図の通路方向を使う処理は
+# 存在せず、本研究が「地図形状の利用」として追加した部分の中心にあたる。
 def route_guidance_enabled():
     """prefer/enforceかつroute_pointsが有効な場合だけ経路案内を使う。"""
     return (
@@ -1404,6 +1494,8 @@ def load_preprocessed_map(img_path):
     return binary, binary_for_pf_local, dist_map
 
 
+# [本研究独自] 二値地図上にroute_pointsを描画して太らせた「経路帯マスク」を作る。
+# 経路優先/強制の重み付け(ParticleFilterPDR.update)や曲がり角近傍判定の土台。
 def build_route_mask(shape):
     mask = np.zeros(shape, dtype=bool)
     if not route_guidance_enabled():
@@ -1483,6 +1575,11 @@ def redraw_all_paths():
         )
 
     file_list = glob.glob(str(data_dir / "pdr_log_*.csv"))
+    if EXCLUDED_CSV_NAMES:
+        excluded_found = [f for f in file_list if Path(f).name in EXCLUDED_CSV_NAMES]
+        file_list = [f for f in file_list if Path(f).name not in EXCLUDED_CSV_NAMES]
+        for f in excluded_found:
+            logging.info(f"[{Path(f).name}] exclude_csv設定によりスキップ")
     file_list.sort()
 
     if not file_list:
@@ -1621,11 +1718,17 @@ def redraw_all_paths():
             )
             turn_pending = False
             initial_map_heading = np.deg2rad(args.initial_heading_deg)
-            initial_sensor_heading = estimate_initial_sensor_heading(
-                df,
-                args.heading_source,
-                args.heading_calibration_samples,
-            )
+            try:
+                # --heading-source androidをyaw_deg列の無い旧CSVへ適用した場合など、
+                # この1ファイルだけの設定不備でバッチ全体が中断しないようにする。
+                initial_sensor_heading = estimate_initial_sensor_heading(
+                    df,
+                    args.heading_source,
+                    args.heading_calibration_samples,
+                )
+            except ValueError as e:
+                logging.warning(f"[{file_name}] 処理をスキップしました: {e}")
+                continue
             logging.info(
                 "  初期方位補正: source=%s, map=%.1fdeg, route_segment=%d",
                 args.heading_source,
@@ -1904,12 +2007,20 @@ def redraw_all_paths():
     fig.canvas.draw()
     fig.canvas.flush_events()
 
+    # 【本研究独自】卒業論文の証拠画像・実行ログとして、実行のたびに必ず結果PNGを
+    # 保存する。--save指定時はそのパスへ、未指定時はRESULTS_DIR以下へ実行日時・
+    # 経路制約モード・乱数シードを含む名前で自動保存する(進捗メモ15章に対応)。
     if args.save is not None:
         save_path = args.save.resolve()
-        save_path.parent.mkdir(parents=True, exist_ok=True)
-        fig.set_size_inches(10, 8, forward=True)
-        fig.savefig(save_path, dpi=200, bbox_inches='tight')
-        logging.info(f"結果画像を保存しました: {save_path}")
+    else:
+        timestamp = time.strftime("%Y%m%d_%H%M%S")
+        seed_text = "none" if args.seed is None else str(args.seed)
+        auto_name = f"{timestamp}_route-{ROUTE_CONSTRAINT_MODE}_seed-{seed_text}.png"
+        save_path = (RESULTS_DIR / auto_name).resolve()
+    save_path.parent.mkdir(parents=True, exist_ok=True)
+    fig.set_size_inches(10, 8, forward=True)
+    fig.savefig(save_path, dpi=200, bbox_inches='tight')
+    logging.info(f"結果画像を保存しました: {save_path}")
 
 
 def main():
