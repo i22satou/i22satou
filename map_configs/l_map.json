@@ -1,0 +1,58 @@
+{
+  "_comment": "L字経路(合成地図L_map.png, Lmap.pyで生成)用のmap_config。2026-08-15新規作成。kanri_4f.json(Z字・実測フロア図)とは独立した第二の検証環境として、route_source=auto等の新機能をL字4CSVでも検証するために作成した。scale_px_per_m/target_distance_px/step_gainはtest7.py(このL字マップを長年使ってきた旧パイプライン)の既存キャリブレーション値をそのまま流用している。route_points/route_width_px等のPF挙動パラメータはkanri_4f.jsonを流用した初期値であり未チューニング。詳細はCLAUDE_MEMO.md参照。",
+  "map_image": "../L_map.png",
+  "data_dir": "/Users/soma/Library/CloudStorage/GoogleDrive-satosoma0608@gmail.com/マイドライブ/PDR",
+  "scale_px_per_m": 40.0,
+  "step_gain": 1.12,
+  "pf_erosion_radius_px": 3,
+  "gyro_unit": "rad",
+  "wall_weight_sigma": 0.6,
+  "wall_weight_floor": 0.5,
+  "off_route_weight": 0.15,
+  "route_width_px": 30.0,
+  "route_constraint_mode": "none",
+  "route_heading_weight": 1.5,
+  "route_corner_threshold_px": 25.0,
+  "route_points": [
+    [50.0, 250.0],
+    [370.0, 250.0],
+    [370.0, 630.0]
+  ],
+  "route_source": "manual",
+  "auto_route_max_half_width_px": 35.0,
+  "auto_route_dilation_px": 0.0,
+  "exclude_csv": [
+    "pdr_log_0805_1438.csv",
+    "pdr_log_0805_1441.csv",
+    "pdr_log_0805_1442.csv"
+  ],
+  "adaptive_pf": {
+    "particles_straight": 250,
+    "particles_turning": 600,
+    "particles_stopped": 100,
+
+    "sigma_step_straight_px": 0.35,
+    "sigma_step_turning_px": 0.7,
+    "sigma_step_stopped_px": 0.1,
+
+    "sigma_angle_straight_deg": 3.0,
+    "sigma_angle_turning_deg": 15.0,
+    "sigma_angle_stopped_deg": 2.0,
+
+    "behavior_window_sec": 1.5,
+
+    "turn_enter_threshold_deg": 20.0,
+    "turn_exit_threshold_deg": 6.0,
+    "turn_yaw_rate_threshold_deg_s": 20.0,
+
+    "particle_resize_jitter_px": 0.5,
+
+    "uncertainty_adaptive_particles": false,
+    "uncertainty_neff_low_ratio": 0.30,
+    "uncertainty_neff_high_ratio": 0.60,
+    "uncertainty_boost_factor": 1.5,
+    "uncertainty_shrink_factor": 0.75,
+    "uncertainty_particles_min": 80,
+    "uncertainty_particles_max": 1200
+  }
+}

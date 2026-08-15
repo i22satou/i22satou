@@ -100,6 +100,14 @@ what came from them versus what this research adds. `pdr_pf_clickstart.py`'s hea
     run in `auto` mode — see the limitation note below.
   - Map-scale-adapted particle counts (250/600/100, vs. the paper's 10/20) with
     weight-based resampling on resize (`resize_particle_set`).
+  - **Uncertainty-adaptive particle count** (`pdr_pf_improved.py` only, added 2026-08-15,
+    `--uncertainty-adaptive-particles`/`--no-uncertainty-adaptive-particles`, default off):
+    `configure_behavior()` scales the movement-behavior-based particle count up/down based on
+    the previous step's Neff-to-particle-count ratio — the first use of Neff (previously
+    computed but only logged) for actual particle-count control. Corresponds to 進捗メモ §6.5,
+    which the memo names as the top-priority original-contribution candidate. Being verified
+    against `auto-enforce` via `compare_route_source.py`'s `auto-enforce-unc` condition — see
+    [CLAUDE_MEMO.md](CLAUDE_MEMO.md) for current results.
   - Experiment infrastructure with no equivalent in either paper: click-to-register start
     positions (`start_positions.csv`), folder-watch auto-redraw (`CSVHandler`), per-run PNG
     archiving (see policy above).
@@ -173,7 +181,9 @@ Common flags (see `parse_args()` in whichever main script you're running): `--da
 {none,prefer,enforce}`, `--no-watch` (single render instead of live folder watch),
 `--no-show` (headless, pairs with `--save`). `pdr_pf_improved.py` only: `--route-source
 {manual,auto}` (default `manual`; `auto` extracts the route corridor mask from the map itself
-instead of `route_points` — see 本研究独自 list above).
+instead of `route_points` — see 本研究独自 list above); `--uncertainty-adaptive-particles`/
+`--no-uncertainty-adaptive-particles` (default off; scales particle count by the previous
+step's Neff ratio — see 本研究独自 list above).
 
 Utility scripts:
 - `map_binarizer.py` — CLI that turns an architectural floorplan image into the white
@@ -183,12 +193,19 @@ Utility scripts:
 - `Lmap.py` / `Cross.py` — generate synthetic L-shaped / cross-shaped test maps.
 - `Trajectory.py` — plots raw `pdr_log_*.csv` trajectories without a PF.
 - `compare_route_source.py` (added 2026-08-15) `[本研究独自]` — runs `pdr_pf_improved.py`
-  via subprocess under `none` / `manual-enforce` / `auto-enforce` conditions on the same
-  data/seed and parses the log output into a comparison table (CSV under `results/` + a
+  via subprocess under `none` / `manual-enforce` / `auto-enforce` / `auto-enforce-unc`
+  conditions on the same data/seed(s) (`--seeds` accepts multiple, for reproducibility
+  checks) and parses the log output into a comparison table (CSV under `results/` + a
   printed summary). Does not modify the PF itself. See
   [CLAUDE_MEMO.md](CLAUDE_MEMO.md) for what it measures, its limits (no per-step ground
-  truth, so not a true RMSE), and the first comparison's results (mixed, not a uniform win
-  for `auto`).
+  truth, so not a true RMSE), and results so far (mixed for `auto` vs `manual`; route
+  constraint of either kind clearly improves reproducibility across seeds).
+- `check_sensor_quality.py` (added 2026-08-15) `[本研究独自]` — read-only diagnostic that
+  imports `pdr_pf_improved` and reuses `get_yaw_rate()`/`apply_map_config()`/`validate_log()`
+  to quantify per-CSV gyro/accel/yaw_deg noise characteristics (CSV under `results/` + a
+  printed summary). Built to test whether per-file sensor-quality variance explains the
+  `pdr_log_0805_1441.csv` vs `pdr_log_0805_1442.csv` gap seen in `compare_route_source.py`
+  — inconclusive so far, see [CLAUDE_MEMO.md](CLAUDE_MEMO.md).
 
 ## Architecture
 
@@ -199,6 +216,24 @@ each one a full copy-and-extend of the previous (not imports/inheritance). They 
 up by different AI tools in sequence (see header comments, e.g. "使用AI: GPT-5 mini" in
 `adaptive_behavior_particle_filter_pdr_route_fixed.py`). Treat everything at or below
 `test11_gemini.py` as historical/reference only unless the user explicitly asks about one.
+
+**2026-08-15 cleanup**: most of this historical tier (`test3.py`–`test6.py`, `test8.py`–
+`test11_gemini.py`, `adaptive_behavior_particle_filter_pdr_route_fixed.py`,
+`pdr_particle_filter.py`, `Cross.py`/`cross_map.png`, and superseded result PNGs —
+`test10_result.png`, `test11_gemini_result.png`, `output_fixed.png`/`output_fixed2.png`,
+`result_none.png`/`result_prefer.png`) was moved to `削除候補/` (a holding folder for the
+user to review before permanent deletion; nothing was deleted outright). **`test7.py` is
+the one exception kept at the repo root** — it's the script that generated `L.png`, which
+is still actively used as a separate figure for the 4 short-route CSVs (`exclude_csv` in
+`map_configs/kanri_4f.json`); `Lmap.py`/`L_map.png` (the synthetic L-map `test7.py` draws
+on) were kept alongside it for the same reason. `results/` was similarly thinned from ~69
+files down to 6 (the latest one-PNG-per-condition example from the `none`/`manual-enforce`/
+`auto-enforce`/`auto-enforce-unc` comparison, plus the two most recent CSV summaries) — the
+rest were intermediate/duplicate runs from `compare_route_source.py`'s seed sweeps and
+parameter-tuning experiments, all moved to `削除候補/results/`. See
+[CLAUDE_MEMO.md](CLAUDE_MEMO.md) for the full file-by-file reasoning, including the two
+moved images (`result_none.png`, `result_prefer.png`) that are flagged as possibly worth
+recovering for a thesis 7.7 失敗例 (failure-case) figure.
 
 The current working scripts are three large (1500–2000 line) near-duplicate single-file
 programs that all implement the same pipeline but have **drifted independently** and are not

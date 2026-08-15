@@ -2,6 +2,21 @@
 # pdr_pf_improved.py
 #
 # 【変更履歴】
+# - 2026-08-15: [本研究独自] 不確実性適応粒子数(進捗反映版メモ.txt §6.5相当)を追加。
+#               直前ステップの実効サンプルサイズ(Neff)を粒子数に対する比率(neff_ratio)
+#               で見て、移動様態ベースの粒子数(先行研究の枠組み)をさらに増減させる
+#               (ParticleFilterPDR.configure_behavior())。--uncertainty-adaptive-particles
+#               /--no-uncertainty-adaptive-particles、またはJSON adaptive_pf内の
+#               uncertainty_adaptive_particles等で切り替え、既定は無効(既存挙動を維持)。
+#               有効化するとNeffという既に計算済みだが未使用だった診断値を初めて
+#               粒子数制御に使う。compare_route_source.pyにauto-enforce-unc条件として
+#               追加し検証中(詳細はCLAUDE_MEMO.md)。
+# - 2026-08-15: extract_auto_route_mask()に緩和的膨張オプション(dilation_px、
+#               --auto-route-dilation-px/JSON auto_route_dilation_px、既定0px)を追加。
+#               「自動マスクが実際の廊下幅に忠実なせいで手動の一様バッファより制約が
+#               厳しくなり全滅回数が増える」という仮説を検証する目的だったが、0〜10px
+#               で振っても全滅回数はほぼ変化せず仮説は棄却された(詳細はCLAUDE_MEMO.md)。
+#               機能自体は今後のチューニング用に残す(既定0pxで従来通りの挙動)。
 # - 2026-08-15: [本研究独自] 経路帯マスクを手動route_pointsに頼らず、二値地図から
 #               自動抽出できるようにした(--route-source {manual,auto}、既定はmanual
 #               で従来通り)。extract_auto_route_mask()が「壁までの距離が
@@ -390,6 +405,7 @@ ROUTE_POINTS = []
 # auto=二値地図から通路領域を自動抽出(extract_auto_route_mask)。
 ROUTE_SOURCE = "manual"
 AUTO_ROUTE_MAX_HALF_WIDTH_PX = 20.0
+AUTO_ROUTE_DILATION_PX = 0.0
 GYRO_UNIT = "rad"
 # 別の図(L字経路用など)で使用しており、このJSONの実行対象からは除外したいCSVファイル名。
 # map_configs/*.jsonの"exclude_csv"(任意設定)から読み込む。ファイル名の完全一致で判定する。
@@ -416,6 +432,21 @@ TURN_ENTER_THRESHOLD = np.deg2rad(20.0)
 TURN_EXIT_THRESHOLD = np.deg2rad(6.0)
 TURN_YAW_RATE_THRESHOLD = np.deg2rad(20.0)
 PARTICLE_RESIZE_JITTER_PX = 0.50
+
+# [本研究独自] 不確実性適応粒子数。移動様態(直進/曲がり/滞留)による粒子数決定
+# (先行研究)に加えて、直前ステップの実効サンプルサイズ(Neff)を粒子数に対する比率
+# (neff_ratio = neff / 直前の粒子数)で見て、重みが少数の粒子に偏っている(不確実性が
+# 高い)場合は移動様態ベースの粒子数を割り増しし、重みがほぼ均等(不確実性が低い)
+# 場合は割り引く。進捗反映版メモ.txt §6.5に相当する機能で、Neffは既存のPF診断用に
+# 計算済みだったが、これまで粒子数制御には使われていなかった。既定では無効
+# (UNCERTAINTY_ADAPTIVE_PARTICLES=False)で、有効化しても既存の挙動を変えない。
+UNCERTAINTY_ADAPTIVE_PARTICLES = False
+UNCERTAINTY_NEFF_LOW_RATIO = 0.30
+UNCERTAINTY_NEFF_HIGH_RATIO = 0.60
+UNCERTAINTY_BOOST_FACTOR = 1.5
+UNCERTAINTY_SHRINK_FACTOR = 0.75
+UNCERTAINTY_PARTICLES_MIN = 80
+UNCERTAINTY_PARTICLES_MAX = 1200
 
 STEP_MIN_INTERVAL = 5
 
@@ -792,6 +823,8 @@ class ParticleFilterPDR:
         self.valid_ratio_history = []
         self.neff_history = []
         self.position_spread_history = []
+        self.uncertainty_boost_count = 0
+        self.uncertainty_shrink_count = 0
 
     def resize_particle_set(self, new_count, jitter_px=0.0):
         """重みに従って粒子集合を増減し、等重みに戻す。"""
@@ -832,12 +865,28 @@ class ParticleFilterPDR:
         self.weights = np.full(new_count, 1.0 / new_count)
 
     def configure_behavior(self, behavior):
-        """移動様態に応じて粒子数とサンプリング分散を更新する。"""
+        """移動様態に応じて粒子数とサンプリング分散を更新する。
+        [本研究独自] UNCERTAINTY_ADAPTIVE_PARTICLES有効時は、直前ステップのNeff比率
+        (neff_ratio)によって移動様態ベースの粒子数をさらに増減させる。
+        """
         behavior_params = behavior_parameters(behavior)
-        self.resize_particle_set(
-            behavior_params["n_particles"],
-            jitter_px=PARTICLE_RESIZE_JITTER_PX,
-        )
+        target_n = behavior_params["n_particles"]
+
+        if UNCERTAINTY_ADAPTIVE_PARTICLES and self.neff_history:
+            last_neff = self.neff_history[-1]
+            last_n = len(self.particles)
+            neff_ratio = (last_neff / last_n) if last_n > 0 else 0.0
+            if neff_ratio < UNCERTAINTY_NEFF_LOW_RATIO:
+                target_n = target_n * UNCERTAINTY_BOOST_FACTOR
+                self.uncertainty_boost_count += 1
+            elif neff_ratio > UNCERTAINTY_NEFF_HIGH_RATIO:
+                target_n = target_n * UNCERTAINTY_SHRINK_FACTOR
+                self.uncertainty_shrink_count += 1
+            target_n = int(np.clip(
+                round(target_n), UNCERTAINTY_PARTICLES_MIN, UNCERTAINTY_PARTICLES_MAX
+            ))
+
+        self.resize_particle_set(target_n, jitter_px=PARTICLE_RESIZE_JITTER_PX)
         self.params["sigma_step"] = behavior_params["sigma_step"]
         self.params["sigma_angle"] = behavior_params["sigma_angle"]
 
@@ -1071,6 +1120,32 @@ def parse_args():
         ),
     )
     parser.add_argument(
+        "--auto-route-dilation-px",
+        type=float,
+        default=None,
+        help=(
+            "route-source=autoで抽出した経路帯マスクへ加える緩和的膨張の半径(px)。"
+            "0(既定)なら地図形状そのまま。手動route_pointsの一様バッファより"
+            "狭い区間でPFが不安定化する場合の緩和用。"
+        ),
+    )
+    parser.add_argument(
+        "--uncertainty-adaptive-particles",
+        dest="uncertainty_adaptive_particles",
+        action="store_true",
+        default=None,
+        help=(
+            "直前ステップのNeff比率に応じて移動様態ベースの粒子数を増減する"
+            "(本研究独自、進捗メモ§6.5相当)。既定はJSON設定(無指定ならOFF)。"
+        ),
+    )
+    parser.add_argument(
+        "--no-uncertainty-adaptive-particles",
+        dest="uncertainty_adaptive_particles",
+        action="store_false",
+        help="--uncertainty-adaptive-particlesを明示的に無効化する(JSON設定を上書き)。",
+    )
+    parser.add_argument(
         "--heading-source",
         choices=["gyro", "android"],
         default="gyro",
@@ -1138,12 +1213,15 @@ def apply_map_config(args, config, config_path):
     global WALL_WEIGHT_SIGMA, WALL_WEIGHT_FLOOR, OFF_ROUTE_WEIGHT
     global ROUTE_WIDTH_PX, ROUTE_HEADING_WEIGHT, ROUTE_CORNER_THRESHOLD_PX
     global ROUTE_CONSTRAINT_MODE, ROUTE_POINTS, GYRO_UNIT, EXCLUDED_CSV_NAMES
-    global ROUTE_SOURCE, AUTO_ROUTE_MAX_HALF_WIDTH_PX
+    global ROUTE_SOURCE, AUTO_ROUTE_MAX_HALF_WIDTH_PX, AUTO_ROUTE_DILATION_PX
     global N_PARTICLES_STRAIGHT, N_PARTICLES_TURNING, N_PARTICLES_STOPPED
     global SIGMA_STEP_STRAIGHT, SIGMA_STEP_TURNING, SIGMA_STEP_STOPPED
     global SIGMA_ANGLE_STRAIGHT, SIGMA_ANGLE_TURNING, SIGMA_ANGLE_STOPPED
     global BEHAVIOR_WINDOW_SEC, TURN_ENTER_THRESHOLD, TURN_EXIT_THRESHOLD
     global TURN_YAW_RATE_THRESHOLD, PARTICLE_RESIZE_JITTER_PX
+    global UNCERTAINTY_ADAPTIVE_PARTICLES, UNCERTAINTY_NEFF_LOW_RATIO, UNCERTAINTY_NEFF_HIGH_RATIO
+    global UNCERTAINTY_BOOST_FACTOR, UNCERTAINTY_SHRINK_FACTOR
+    global UNCERTAINTY_PARTICLES_MIN, UNCERTAINTY_PARTICLES_MAX
 
     config_dir = config_path.parent
     config_name = str(config_path)
@@ -1179,6 +1257,10 @@ def apply_map_config(args, config, config_path):
     if ROUTE_SOURCE not in {"manual", "auto"}:
         raise ValueError("route_sourceはmanualまたはautoのいずれかです。")
     AUTO_ROUTE_MAX_HALF_WIDTH_PX = float(config.get("auto_route_max_half_width_px", 20.0))
+    configured_dilation = float(config.get("auto_route_dilation_px", 0.0))
+    AUTO_ROUTE_DILATION_PX = (
+        args.auto_route_dilation_px if args.auto_route_dilation_px is not None else configured_dilation
+    )
     if ROUTE_SOURCE == "auto":
         ROUTE_POINTS = []
     GYRO_UNIT = str(require_config_value(config, "gyro_unit", config_name)).lower()
@@ -1204,6 +1286,21 @@ def apply_map_config(args, config, config_path):
     TURN_EXIT_THRESHOLD = np.deg2rad(float(require_config_value(adaptive, "turn_exit_threshold_deg", adaptive_name)))
     TURN_YAW_RATE_THRESHOLD = np.deg2rad(float(require_config_value(adaptive, "turn_yaw_rate_threshold_deg_s", adaptive_name)))
     PARTICLE_RESIZE_JITTER_PX = float(require_config_value(adaptive, "particle_resize_jitter_px", adaptive_name))
+
+    # 不確実性適応粒子数(§6.5相当)は任意設定。既定は無効で、JSON/CLIどちらでも
+    # 明示的に有効化しない限り既存の挙動(移動様態のみによる粒子数決定)のまま。
+    configured_uncertainty = bool(adaptive.get("uncertainty_adaptive_particles", False))
+    UNCERTAINTY_ADAPTIVE_PARTICLES = (
+        args.uncertainty_adaptive_particles
+        if args.uncertainty_adaptive_particles is not None
+        else configured_uncertainty
+    )
+    UNCERTAINTY_NEFF_LOW_RATIO = float(adaptive.get("uncertainty_neff_low_ratio", 0.30))
+    UNCERTAINTY_NEFF_HIGH_RATIO = float(adaptive.get("uncertainty_neff_high_ratio", 0.60))
+    UNCERTAINTY_BOOST_FACTOR = float(adaptive.get("uncertainty_boost_factor", 1.5))
+    UNCERTAINTY_SHRINK_FACTOR = float(adaptive.get("uncertainty_shrink_factor", 0.75))
+    UNCERTAINTY_PARTICLES_MIN = int(adaptive.get("uncertainty_particles_min", 80))
+    UNCERTAINTY_PARTICLES_MAX = int(adaptive.get("uncertainty_particles_max", 1200))
 
     data_dir = (resolve_config_value_path(config.get("data_dir"), config_dir)
                 if args.data_dir is None else args.data_dir.expanduser().resolve())
@@ -1238,6 +1335,14 @@ def apply_map_config(args, config, config_path):
         f"経路外重み={OFF_ROUTE_WEIGHT:.2f}"
     )
     logging.info("総距離校正: " + ("無効" if args.target_distance_px is None else f"{args.target_distance_px:.1f}px"))
+    logging.info(
+        "不確実性適応粒子数: " + (
+            f"有効 (neff比率<{UNCERTAINTY_NEFF_LOW_RATIO:.2f}で×{UNCERTAINTY_BOOST_FACTOR:.2f}, "
+            f">{UNCERTAINTY_NEFF_HIGH_RATIO:.2f}で×{UNCERTAINTY_SHRINK_FACTOR:.2f}, "
+            f"範囲[{UNCERTAINTY_PARTICLES_MIN},{UNCERTAINTY_PARTICLES_MAX}])"
+            if UNCERTAINTY_ADAPTIVE_PARTICLES else "無効"
+        )
+    )
 
 
 def compute_acc_magnitude(df):
@@ -1557,7 +1662,7 @@ def build_route_mask(shape):
 # 最大の連結成分を通路網として採用する(広い部屋は距離が大きく候補から外れるため、
 # 廊下だけが概ね残る)。曲がり角に連動した方位補正(route_guidance_enabled系)は
 # 順序付きroute_pointsが前提のため、autoではまだ対応しない(空間的な経路帯制約のみ)。
-def extract_auto_route_mask(binary_for_pf_local, max_half_width_px):
+def extract_auto_route_mask(binary_for_pf_local, max_half_width_px, dilation_px=0.0):
     free = binary_for_pf_local == 255
     dist = ndimage.distance_transform_edt(free)
     corridor_candidate = free & (dist <= max_half_width_px)
@@ -1567,7 +1672,19 @@ def extract_auto_route_mask(binary_for_pf_local, max_half_width_px):
         return np.ones(free.shape, dtype=bool)
     sizes = ndimage.sum(corridor_candidate, labeled, range(1, n + 1))
     largest_label = int(np.argmax(sizes)) + 1
-    return labeled == largest_label
+    mask = labeled == largest_label
+    # [本研究独自] 抽出した通路領域は実際の建物形状に忠実な幅を持つため、狭い区間では
+    # 手動route_pointsの一様バッファ(半径18px)より制約が厳しくなりPFが不安定化する
+    # ことが確認された(CLAUDE_MEMO.md参照)。dilation_px>0を指定すると、抽出した形状は
+    # 保ったまま境界へ数px分の余裕(膨張)を追加できる。地図の実形状からの乖離を最小限に
+    # 抑えつつ、粒子ノイズへの緩衝を持たせるための後処理。
+    if dilation_px > 0:
+        radius = max(1, int(round(dilation_px)))
+        yy, xx = np.ogrid[-radius:radius + 1, -radius:radius + 1]
+        disk = xx * xx + yy * yy <= radius * radius
+        mask = ndimage.binary_dilation(mask, structure=disk)
+        mask &= free
+    return mask
 
 
 # グローバルな描画・監視状態
@@ -2028,6 +2145,12 @@ def redraw_all_paths():
                     np.mean(pf.neff_history),
                     np.mean(pf.position_spread_history),
                 )
+            if UNCERTAINTY_ADAPTIVE_PARTICLES:
+                logging.info(
+                    "  不確実性適応: 増加ステップ=%d, 減少ステップ=%d",
+                    pf.uncertainty_boost_count,
+                    pf.uncertainty_shrink_count,
+                )
             if estimated_positions:
                 last = estimated_positions[-1]
                 logging.info(f"  最終推定位置: x={last[0]:.1f}, y={last[1]:.1f}")
@@ -2054,15 +2177,16 @@ def redraw_all_paths():
     logging.info("\n適応型パーティクルフィルタを使用")
     logging.info(f"Overall time: {end_overall - start_overall:.2f} seconds")
 
+    unc_tag = "+unc" if UNCERTAINTY_ADAPTIVE_PARTICLES else ""
     ax.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
     title = (
         "移動様態適応型PF + SmartPDR "
-        f"（経路制約: {ROUTE_CONSTRAINT_MODE}/{ROUTE_SOURCE}, 方位: {args.heading_source}）"
+        f"（経路制約: {ROUTE_CONSTRAINT_MODE}/{ROUTE_SOURCE}{unc_tag}, 方位: {args.heading_source}）"
     )
     if japanize_matplotlib is None:
         title = (
             "Behavior-adaptive PF + SmartPDR "
-            f"(route={ROUTE_CONSTRAINT_MODE}/{ROUTE_SOURCE}, heading={args.heading_source})"
+            f"(route={ROUTE_CONSTRAINT_MODE}/{ROUTE_SOURCE}{unc_tag}, heading={args.heading_source})"
         )
     ax.set_title(title)
 
@@ -2078,7 +2202,7 @@ def redraw_all_paths():
     else:
         timestamp = time.strftime("%Y%m%d_%H%M%S")
         seed_text = "none" if args.seed is None else str(args.seed)
-        auto_name = f"{timestamp}_route-{ROUTE_CONSTRAINT_MODE}-{ROUTE_SOURCE}_seed-{seed_text}.png"
+        auto_name = f"{timestamp}_route-{ROUTE_CONSTRAINT_MODE}-{ROUTE_SOURCE}{unc_tag}_seed-{seed_text}.png"
         save_path = (RESULTS_DIR / auto_name).resolve()
     save_path.parent.mkdir(parents=True, exist_ok=True)
     fig.set_size_inches(10, 8, forward=True)
@@ -2107,10 +2231,12 @@ def main():
     if not data_dir.exists():
         raise FileNotFoundError(f"CSVフォルダが見つかりません: {data_dir}")
     if ROUTE_SOURCE == "auto":
-        route_mask = extract_auto_route_mask(binary_for_pf, AUTO_ROUTE_MAX_HALF_WIDTH_PX)
+        route_mask = extract_auto_route_mask(
+            binary_for_pf, AUTO_ROUTE_MAX_HALF_WIDTH_PX, AUTO_ROUTE_DILATION_PX
+        )
         logging.info(
             f"自動抽出した通路マスク: 有効画素数={int(route_mask.sum())}/{route_mask.size} "
-            f"(半径閾値={AUTO_ROUTE_MAX_HALF_WIDTH_PX:.1f}px)"
+            f"(半径閾値={AUTO_ROUTE_MAX_HALF_WIDTH_PX:.1f}px, 膨張={AUTO_ROUTE_DILATION_PX:.1f}px)"
         )
     else:
         route_mask = build_route_mask(binary.shape)
