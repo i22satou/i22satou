@@ -16,7 +16,7 @@ route_source=autoの検証中に見つかった1441/1442の謎)は、両方の�
 
 | ファイル | 扱っている内容 |
 |---|---|
-| [memo/route_source_auto.md](memo/route_source_auto.md) | route_source=auto(二値地図からの経路帯マスク自動抽出)の実装・none/manual/auto比較実験・L字マップでの第二検証環境の試み(不採用) |
+| [memo/route_source_auto.md](memo/route_source_auto.md) | route_source=auto(二値地図からの経路帯マスク自動抽出)の実装・none/manual/auto比較実験・L字マップでの第二検証環境の試み(不採用)・中心線抽出の実装と、通路/部屋境界を区別するexclude_wide_roomsの実装(6シード検証で全滅回数-16.8%・終点誤差-18.5%、既定OFF) |
 | [memo/uncertainty_particles.md](memo/uncertainty_particles.md) | 不確実性適応粒子数(§6.5)の実装・6シード検証・4パラメータの感度分析(初期値は妥当と確認) |
 | [memo/sensor_mystery.md](memo/sensor_mystery.md) | pdr_log_0805_1441.csv vs 1442.csvの性能差調査(**未解決**)。センサー品質診断・複数シード再検証 |
 | [memo/file_cleanup.md](memo/file_cleanup.md) | 不要ファイルの「削除候補」フォルダへの移動(2026-08-15) |

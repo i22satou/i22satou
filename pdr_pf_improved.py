@@ -2,6 +2,46 @@
 # pdr_pf_improved.py
 #
 # 【変更履歴】
+# - 2026-08-16: [本研究独自] extract_auto_route_mask()に、大きな部屋の壁際の帯を
+#               通路候補から除外するexclude_wide_rooms引数を追加(既定False、既存の
+#               route_source=auto比較実験の結果は変更しない)。半径max_half_width_px
+#               の円盤でfreeをモルフォロジー開放し、その結果(円盤が収まるほど広い
+#               領域=部屋の内部)を通路候補から差し引く。CLI
+#               --auto-route-exclude-wide-rooms/JSON auto_route_exclude_wide_roomsで
+#               有効化。原因調査(直前のコメント訂正2件)を踏まえた対策の実装。
+# - 2026-08-16: extract_ordered_centerline()のコメントを再訂正(原因の特定)。
+#               kanri_4f_preview_final3.png(生成時の壁検出結果がそのまま残っている
+#               確認用画像)と実際の平面図を1px単位で照合した結果、「輪」に見える
+#               原因は2つの組み合わせと判明した: (1)西側廊下・東側廊下(高さが異なる)
+#               を繋ぐホール・階段は実在する正しい接続、(2)もう一方は
+#               extract_auto_route_mask()が大きな部屋の壁際の帯を通路と区別できず、
+#               たまたま別の階段の踊り場まで繋がって見える見せかけの経路。壁検出自体
+#               (文字を壁と誤認しないための水平・垂直線分抽出)は平面図と照合して
+#               正確だったため、原因は文字認識の問題ではなく、通路と部屋の壁際を
+#               区別できないマスク生成方式そのものの設計限界だった。安全装置の実装・
+#               挙動・検証結果に変更はない(詳細はmemo/route_source_auto.md)。
+# - 2026-08-16: extract_ordered_centerline()のコメントを訂正。kanri_4f.jpgで
+#               単体検証中に発見した「2本の帯が両端付近で連結して見える」構造を、
+#               当初は「通路網が輪(ループ)になっている」と誤って解釈していたが、
+#               ユーザーから実際の平面図(PDF)で「両端はそれぞれ別の階段(3Fへの階段・
+#               屋外階段)であり、通路同士が直接繋がっているわけではない」との訂正を
+#               受けた。安全装置(迂回率チェック)自体の実装・挙動・検証結果に変更は
+#               ないが、その原因についての説明(コメント・memo)を訂正した
+#               (詳細はmemo/route_source_auto.md)。
+# - 2026-08-16: [本研究独自] route_source=autoでも曲がり角連動の方位補正
+#               (route_guidance_enabled系)が働くよう、自動抽出した経路帯マスクを
+#               細線化(skimage.morphology.skeletonize)して1本の順序付き中心線を
+#               抽出し、簡略化(RDP法)した上でROUTE_POINTSとして使う機能を追加
+#               (extract_ordered_centerline())。既定は無効
+#               (--auto-route-centerline/JSON auto_route_centerline_enabled、
+#               無指定ならFalseで従来通りroute_pointsは空のまま)。現在の実測データ
+#               (0805系)の通路は分岐のない単純な形状であることを確認済みのため、
+#               骨格化後の小さな分岐・突起はノイズとみなし、最も長い経路(木の直径)
+#               1本だけを採用する簡易版とした(分岐を含む通路網への対応=§6.2の
+#               完全版は今後の課題のまま)。経路帯マスク自体(extract_auto_route_mask)
+#               や既定OFF時の挙動は変更していない。新規依存としてscikit-image
+#               (skimage)を追加(環境には導入済み、extract_auto_route_mask設計時の
+#               「新規ライブラリ依存なし」方針からの変更。詳細はmemo/route_source_auto.md)。
 # - 2026-08-16: 不確実性適応粒子数の4パラメータ(neff_low_ratio/neff_high_ratio/
 #               boost_factor/shrink_factor)をCLIから個別に上書きできる引数
 #               (--uncertainty-neff-low-ratio等)を追加。挙動自体は変更せず、
@@ -361,6 +401,9 @@ import matplotlib.pyplot as plt
 from scipy.signal import find_peaks
 from scipy import ndimage
 from PIL import Image
+# [本研究独自] route_source=autoの通路帯マスクを細線化して中心線を得るために使用
+# (extract_ordered_centerline)。新規ライブラリ依存(既に環境に導入済み)。
+from skimage.morphology import skeletonize
 
 try:
     import japanize_matplotlib  # 日本語用のライブラリ
@@ -411,6 +454,21 @@ ROUTE_POINTS = []
 ROUTE_SOURCE = "manual"
 AUTO_ROUTE_MAX_HALF_WIDTH_PX = 20.0
 AUTO_ROUTE_DILATION_PX = 0.0
+# [本研究独自] 大きな部屋の壁際の帯を通路候補から除外するか(extract_auto_route_mask
+# のexclude_wide_rooms引数)。既定は無効(既存のroute_source=auto比較実験の結果を
+# 変えないため)。詳細はextract_auto_route_mask()のコメント・memo/route_source_auto.md参照。
+AUTO_ROUTE_EXCLUDE_WIDE_ROOMS = False
+AUTO_ROUTE_EXCLUDE_WIDE_ROOMS_RADIUS_PX = None
+# [本研究独自] route_source=autoの経路帯マスクを細線化して順序付き中心線を作り、
+# ROUTE_POINTSとして曲がり角連動の方位補正に使うかどうか。既定は無効(空間マスクの
+# みのこれまでの挙動を維持)。extract_ordered_centerline()参照。
+AUTO_ROUTE_CENTERLINE_ENABLED = False
+AUTO_ROUTE_CENTERLINE_SIMPLIFY_PX = 10.0
+# [本研究独自] 抽出した中心線の「始点・終点間の直線距離」に対する実経路長の比率が
+# これを超えたら、通路網がループ状で木の直径探索が誤った経路を選んだとみなし抽出を
+# 諦める(extract_ordered_centerline参照)。CLI/JSONでは調整不要な内部安全弁のため
+# 定数のまま(単純なL字・コの字程度の通路なら通常2倍を大きく超えない)。
+AUTO_ROUTE_CENTERLINE_MAX_DETOUR_RATIO = 2.5
 GYRO_UNIT = "rad"
 # 別の図(L字経路用など)で使用しており、このJSONの実行対象からは除外したいCSVファイル名。
 # map_configs/*.jsonの"exclude_csv"(任意設定)から読み込む。ファイル名の完全一致で判定する。
@@ -1121,7 +1179,9 @@ def parse_args():
         help=(
             "経路帯マスクの生成元。manual=JSONのroute_pointsを使用(方式D)、"
             "auto=二値地図から通路領域を自動抽出し手動route_pointsは使用しない"
-            "(本研究独自、曲がり角の方位補正はまだ対応せず空間マスクのみ)。"
+            "(本研究独自。曲がり角連動の方位補正は既定では空間マスクのみで無効、"
+            "--auto-route-centerlineで有効化可能だが輪状の通路網では安全側に"
+            "フォールバックする。詳細はmemo/route_source_auto.md)。"
         ),
     )
     parser.add_argument(
@@ -1132,6 +1192,61 @@ def parse_args():
             "route-source=autoで抽出した経路帯マスクへ加える緩和的膨張の半径(px)。"
             "0(既定)なら地図形状そのまま。手動route_pointsの一様バッファより"
             "狭い区間でPFが不安定化する場合の緩和用。"
+        ),
+    )
+    parser.add_argument(
+        "--auto-route-exclude-wide-rooms",
+        dest="auto_route_exclude_wide_rooms",
+        action="store_true",
+        default=None,
+        help=(
+            "route-source=autoの通路候補から、大きな部屋の壁際の帯を除外する"
+            "(モルフォロジー開放で広い領域を差し引く。本研究独自)。既定はJSON設定"
+            "(無指定ならOFF、従来通り除外しない)。半径が小さすぎるとホール等の"
+            "本物の合流点まで消えて分断される場合があるので"
+            "--auto-route-exclude-wide-rooms-radius-pxで調整する。"
+        ),
+    )
+    parser.add_argument(
+        "--no-auto-route-exclude-wide-rooms",
+        dest="auto_route_exclude_wide_rooms",
+        action="store_false",
+        help="--auto-route-exclude-wide-roomsを明示的に無効化する(JSON設定を上書き)。",
+    )
+    parser.add_argument(
+        "--auto-route-exclude-wide-rooms-radius-px",
+        type=float,
+        default=None,
+        help=(
+            "広い部屋を除外するモルフォロジー開放の半径(px)。既定は"
+            "max(max_half_width_px*1.5, max_half_width_px+10)。大きくすると本物の"
+            "広めの合流点(ホール等)を残しやすいが、部屋の除外効果は弱くなる。"
+        ),
+    )
+    parser.add_argument(
+        "--auto-route-centerline",
+        dest="auto_route_centerline_enabled",
+        action="store_true",
+        default=None,
+        help=(
+            "route-source=autoの経路帯マスクを細線化し、順序付き中心線を"
+            "ROUTE_POINTSとして曲がり角連動の方位補正に使う(本研究独自)。"
+            "既定はJSON設定(無指定ならOFF、従来通り空間マスクのみ)。"
+        ),
+    )
+    parser.add_argument(
+        "--no-auto-route-centerline",
+        dest="auto_route_centerline_enabled",
+        action="store_false",
+        help="--auto-route-centerlineを明示的に無効化する(JSON設定を上書き)。",
+    )
+    parser.add_argument(
+        "--auto-route-centerline-simplify-px",
+        type=float,
+        default=None,
+        help=(
+            "中心線を折れ線に簡略化する際の許容誤差(px、RDP法、既定10.0)。"
+            "大きいほど直線区間が少なく粗い経路になる。"
         ),
     )
     parser.add_argument(
@@ -1237,6 +1352,8 @@ def apply_map_config(args, config, config_path):
     global ROUTE_WIDTH_PX, ROUTE_HEADING_WEIGHT, ROUTE_CORNER_THRESHOLD_PX
     global ROUTE_CONSTRAINT_MODE, ROUTE_POINTS, GYRO_UNIT, EXCLUDED_CSV_NAMES
     global ROUTE_SOURCE, AUTO_ROUTE_MAX_HALF_WIDTH_PX, AUTO_ROUTE_DILATION_PX
+    global AUTO_ROUTE_EXCLUDE_WIDE_ROOMS, AUTO_ROUTE_EXCLUDE_WIDE_ROOMS_RADIUS_PX
+    global AUTO_ROUTE_CENTERLINE_ENABLED, AUTO_ROUTE_CENTERLINE_SIMPLIFY_PX
     global N_PARTICLES_STRAIGHT, N_PARTICLES_TURNING, N_PARTICLES_STOPPED
     global SIGMA_STEP_STRAIGHT, SIGMA_STEP_TURNING, SIGMA_STEP_STOPPED
     global SIGMA_ANGLE_STRAIGHT, SIGMA_ANGLE_TURNING, SIGMA_ANGLE_STOPPED
@@ -1284,8 +1401,31 @@ def apply_map_config(args, config, config_path):
     AUTO_ROUTE_DILATION_PX = (
         args.auto_route_dilation_px if args.auto_route_dilation_px is not None else configured_dilation
     )
+    configured_exclude_wide_rooms = bool(config.get("auto_route_exclude_wide_rooms", False))
+    AUTO_ROUTE_EXCLUDE_WIDE_ROOMS = (
+        args.auto_route_exclude_wide_rooms if args.auto_route_exclude_wide_rooms is not None
+        else configured_exclude_wide_rooms
+    )
+    configured_exclude_radius = config.get("auto_route_exclude_wide_rooms_radius_px")
+    AUTO_ROUTE_EXCLUDE_WIDE_ROOMS_RADIUS_PX = (
+        args.auto_route_exclude_wide_rooms_radius_px
+        if args.auto_route_exclude_wide_rooms_radius_px is not None
+        else (float(configured_exclude_radius) if configured_exclude_radius is not None else None)
+    )
     if ROUTE_SOURCE == "auto":
         ROUTE_POINTS = []
+    # 中心線抽出(自動抽出マスクの細線化)の既定はJSON設定(無ければOFF)。
+    # main()でroute_maskが確定した後にextract_ordered_centerline()を呼び、
+    # 有効時のみROUTE_POINTSをここでの[]から上書きする。
+    configured_centerline_enabled = bool(config.get("auto_route_centerline_enabled", False))
+    AUTO_ROUTE_CENTERLINE_ENABLED = (
+        args.auto_route_centerline_enabled if args.auto_route_centerline_enabled is not None
+        else configured_centerline_enabled
+    )
+    AUTO_ROUTE_CENTERLINE_SIMPLIFY_PX = (
+        args.auto_route_centerline_simplify_px if args.auto_route_centerline_simplify_px is not None
+        else float(config.get("auto_route_centerline_simplify_px", 10.0))
+    )
     GYRO_UNIT = str(require_config_value(config, "gyro_unit", config_name)).lower()
     if GYRO_UNIT not in {"rad", "deg"}:
         raise ValueError("gyro_unit は 'rad' または 'deg' を指定してください。")
@@ -1364,6 +1504,15 @@ def apply_map_config(args, config, config_path):
     logging.info(f"経路帯生成元: {ROUTE_SOURCE}" + (
         f" (半径閾値={AUTO_ROUTE_MAX_HALF_WIDTH_PX:.1f}px)" if ROUTE_SOURCE == "auto" else ""
     ))
+    if ROUTE_SOURCE == "auto":
+        logging.info(
+            "広い部屋の壁際を除外: " + ("有効" if AUTO_ROUTE_EXCLUDE_WIDE_ROOMS else "無効")
+        )
+        logging.info(
+            "自動中心線抽出(方位補正用): "
+            + ("有効" if AUTO_ROUTE_CENTERLINE_ENABLED else "無効")
+            + (f" (簡略化閾値={AUTO_ROUTE_CENTERLINE_SIMPLIFY_PX:.1f}px)" if AUTO_ROUTE_CENTERLINE_ENABLED else "")
+        )
     logging.info(
         f"経路優先: {len(ROUTE_POINTS)}点, 幅={ROUTE_WIDTH_PX:.1f}px, "
         f"曲がり角判定距離={ROUTE_CORNER_THRESHOLD_PX:.1f}px, "
@@ -1697,10 +1846,46 @@ def build_route_mask(shape):
 # 最大の連結成分を通路網として採用する(広い部屋は距離が大きく候補から外れるため、
 # 廊下だけが概ね残る)。曲がり角に連動した方位補正(route_guidance_enabled系)は
 # 順序付きroute_pointsが前提のため、autoではまだ対応しない(空間的な経路帯制約のみ)。
-def extract_auto_route_mask(binary_for_pf_local, max_half_width_px, dilation_px=0.0):
+#
+# [本研究独自] ただし上記の「壁までの距離」だけの判定では、大きな部屋の壁際の帯
+# (片側は壁、反対側は広い部屋の内部)を、両側を壁に挟まれた本物の通路と区別できない
+# (2026-08-16、kanri_4fの中心線抽出で発見。詳細はmemo/route_source_auto.md)。
+# exclude_wide_rooms=Trueを指定すると、半径exclude_wide_rooms_radius_pxの円盤でfreeを
+# モルフォロジー開放(収縮→膨張)した結果を通路候補から差し引く。円盤が完全に
+# 収まるくらい広い領域(部屋の内部)は開放でほぼ元の形が復元されるため除外され、
+# 円盤の直径より狭い領域は収縮で消えて開放結果に含まれず、除外されずに残る。
+# 既定はFalse(既存のroute_source=auto比較実験の結果を変えないため)。
+#
+# [本研究独自] 除外半径はmax_half_width_pxとは別のパラメータにしている。kanri_4fで
+# 単体検証したところ、半径=max_half_width_px(20px)では西側廊下・東側廊下を繋ぐ
+# ホール自体も「広い部屋」として除外されてしまい、通路網が西西/東に分断されて
+# 小さい方(西側、実測データの開始位置を含む)が最大連結成分から漏れ、
+# route_constraint_mode=enforceでPFが全滅する事故が起きた(2026-08-16、単体検証で
+# 発見)。半径を30px程度まで上げるとホールは開放されず(生き残り)、大きな部屋
+# (電子工学実験室等)は開放される、というちょうど良い境界が見つかったため、
+# 既定値は「max_half_width_pxそのものではなく、それより広めの別定数」とした。
+def extract_auto_route_mask(
+    binary_for_pf_local, max_half_width_px, dilation_px=0.0,
+    exclude_wide_rooms=False, exclude_wide_rooms_radius_px=None,
+):
     free = binary_for_pf_local == 255
     dist = ndimage.distance_transform_edt(free)
     corridor_candidate = free & (dist <= max_half_width_px)
+    if exclude_wide_rooms:
+        radius_px = (
+            exclude_wide_rooms_radius_px if exclude_wide_rooms_radius_px is not None
+            else max(max_half_width_px * 1.5, max_half_width_px + 10.0)
+        )
+        radius = max(1, int(round(radius_px)))
+        yy, xx = np.ogrid[-radius:radius + 1, -radius:radius + 1]
+        disk = xx * xx + yy * yy <= radius * radius
+        wide_rooms = ndimage.binary_opening(free, structure=disk)
+        excluded = corridor_candidate & wide_rooms
+        corridor_candidate = corridor_candidate & ~wide_rooms
+        logging.info(
+            f"route_source=auto 広い部屋の壁際を除外: {int(excluded.sum())}px "
+            f"(開放半径={radius_px:.1f}px)"
+        )
     labeled, n = ndimage.label(corridor_candidate, structure=np.ones((3, 3)))
     if n == 0:
         logging.warning("route_source=autoで通路領域が抽出できませんでした。全域を通路として扱います。")
@@ -1720,6 +1905,142 @@ def extract_auto_route_mask(binary_for_pf_local, max_half_width_px, dilation_px=
         mask = ndimage.binary_dilation(mask, structure=disk)
         mask &= free
     return mask
+
+
+# [本研究独自] extract_auto_route_mask()が作る領域マスクを細線化(skeletonize)して
+# 1本の順序付き中心線を抽出し、既存の曲がり角連動方位補正(route_guidance_enabled系、
+# もともとroute_points前提)をroute_source=autoでも動かせるようにする。マスクの空間
+# 制約自体(PFの重み付け)はextract_auto_route_mask()のまま変更せず、この関数の結果は
+# ROUTE_POINTS(方位補正・曲がり角判定用)にのみ使う。
+# 現在の実測データ(0805系)の通路は分岐のない単純な形状であることを確認済み
+# (memo/route_source_auto.md)なので、骨格化後にできる小さな分岐・突起はノイズと
+# みなし、木の直径(最も長い経路)を1本だけ採用する簡易版とした。分岐を含む通路網
+# (§6.2の完全版)への対応は今後の課題。
+def extract_ordered_centerline(mask, simplify_tolerance_px):
+    """経路帯マスクから順序付き中心線をROUTE_POINTS形式((x, y)タプルのリスト)で返す。
+    抽出できない場合は空リストを返す(呼び出し側はROUTE_POINTS=[]のまま、つまり
+    方位補正が無効な従来挙動にフォールバックする)。
+    """
+    skeleton = skeletonize(mask)
+    ys, xs = np.nonzero(skeleton)
+    if len(ys) < 2:
+        return []
+
+    pixel_set = set(zip(ys.tolist(), xs.tolist()))
+    neighbor_offsets = [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 1), (1, -1), (1, 0), (1, 1)]
+
+    def neighbors(p):
+        y, x = p
+        return [q for dy, dx in neighbor_offsets if (q := (y + dy, x + dx)) in pixel_set]
+
+    def bfs_farthest(start):
+        """startから幅優先探索し、最も遠い(最終的に訪問した)画素と、経路復元用の
+        親ポインタ辞書を返す。木でない(小さな輪)場合も、幅優先で得られる木構造上で
+        近似的に最遠点を求めるヒューリスティックとして扱う。"""
+        visited = {start: None}
+        queue = collections.deque([start])
+        farthest = start
+        while queue:
+            current = queue.popleft()
+            farthest = current
+            for nxt in neighbors(current):
+                if nxt not in visited:
+                    visited[nxt] = current
+                    queue.append(nxt)
+        return farthest, visited
+
+    # 木の直径を求める定番の2回BFS(始点は骨格の任意の画素でよい)。
+    any_pixel = next(iter(pixel_set))
+    one_end, _ = bfs_farthest(any_pixel)
+    other_end, visited = bfs_farthest(one_end)
+
+    if len(visited) < len(pixel_set) * 0.9:
+        logging.warning(
+            "route_source=auto中心線抽出: 骨格が複数の連結成分に分かれている可能性があります"
+            f"(到達画素={len(visited)}/{len(pixel_set)})。最も長い経路のみを採用します。"
+        )
+
+    path = []
+    node = other_end
+    while node is not None:
+        path.append(node)
+        node = visited[node]
+    path.reverse()  # one_end -> other_end の順
+
+    points_xy = [(float(x), float(y)) for y, x in path]
+
+    # [本研究独自] マスクが「輪」状に連結して見える場合への安全装置。
+    # extract_auto_route_mask()の最大連結成分には、kanri_4f.jpgのように、2値化した
+    # 地図上では2本の帯が両端付近で連結して見える場合がある(2026-08-16、単体検証で
+    # 発見)。実際の建物平面図・壁検出結果(kanri_4f_preview_final3.png)と1px単位で
+    # 照合したところ、原因は2つの組み合わせだった: (1)高さの異なる西側廊下・東側廊下
+    # を繋ぐホール・階段(3Fへの階段)は実在する正しい接続、(2)もう一方は
+    # extract_auto_route_mask()が壁までの距離のみで通路候補を判定するため、大きな
+    # 部屋(電子工学実験室等)の壁際の帯を通路と区別できず、たまたま別の階段(屋外階段)
+    # の踊り場まで繋がって見えるだけの見せかけの経路だった。文字(部屋番号等)を壁と
+    # 誤認したことが原因ではない(壁検出結果を平面図と照合して正確だったことを確認
+    # 済み)。詳細はmemo/route_source_auto.md参照。理由の組み合わせによらず、
+    # このように連結して見える場合は木の直径探索が誤って輪をぐるっと回る経路を
+    # 「最も長い経路」として選んでしまうため、実際の経路長が始点・終点間の直線距離に
+    # 対して極端に長い(=大きく迂回している)場合はこの誤検出とみなし、抽出を諦めて
+    # 空リストを返す(呼び出し側は従来通りROUTE_POINTS=[]のまま、方位補正なしに
+    # フォールバックする)。通路と部屋の壁際を区別できるマスク生成方式への改良や、
+    # 分岐を含む通路網への正式対応(§6.2の通路グラフ)は今後の課題。
+    path_xy = np.asarray(points_xy, dtype=float)
+    path_length = float(np.sum(np.hypot(*np.diff(path_xy, axis=0).T)))
+    straight_dist = float(np.hypot(*(path_xy[-1] - path_xy[0])))
+    detour_ratio = path_length / straight_dist if straight_dist > 1e-6 else float("inf")
+    if detour_ratio > AUTO_ROUTE_CENTERLINE_MAX_DETOUR_RATIO:
+        logging.warning(
+            "route_source=auto中心線抽出: 始点・終点間の迂回率が"
+            f"{detour_ratio:.1f}倍(経路長={path_length:.0f}px, 直線距離={straight_dist:.0f}px)と"
+            f"閾値({AUTO_ROUTE_CENTERLINE_MAX_DETOUR_RATIO:.1f}倍)を超えており、"
+            "通路網がループ(輪)状になっている可能性があります。誤った経路を採用しない"
+            "ため中心線抽出を見送ります。"
+        )
+        return []
+
+    return _rdp_simplify(points_xy, simplify_tolerance_px)
+
+
+def _rdp_simplify(points, epsilon):
+    """Ramer-Douglas-Peucker法による折れ線の簡略化。細線化直後のジグザグな画素列
+    (points、(x, y)のリスト)から、epsilon(px)より線分から離れた点だけを残すことで、
+    ROUTE_POINTSとして使える少数の直線区間(曲がり角)へ変換する。再帰ではなく
+    明示的なスタックで実装し、画素数が多い経路でも再帰上限に触れないようにする。
+    """
+    if len(points) < 3 or epsilon <= 0:
+        return points
+
+    pts = np.asarray(points, dtype=float)
+    keep = np.zeros(len(points), dtype=bool)
+    keep[0] = True
+    keep[-1] = True
+    stack = [(0, len(points) - 1)]
+
+    while stack:
+        start_i, end_i = stack.pop()
+        if end_i - start_i < 2:
+            continue
+        start, end = pts[start_i], pts[end_i]
+        dx, dy = end[0] - start[0], end[1] - start[1]
+        seg_len = float(np.hypot(dx, dy))
+        inner_x = pts[start_i + 1:end_i, 0]
+        inner_y = pts[start_i + 1:end_i, 1]
+        if seg_len < 1e-9:
+            dists = np.hypot(inner_x - start[0], inner_y - start[1])
+        else:
+            cross = np.abs(dy * (inner_x - start[0]) - dx * (inner_y - start[1]))
+            dists = cross / seg_len
+        max_local = int(np.argmax(dists))
+        max_dist = float(dists[max_local])
+        split_i = start_i + 1 + max_local
+        if max_dist > epsilon:
+            keep[split_i] = True
+            stack.append((start_i, split_i))
+            stack.append((split_i, end_i))
+
+    return [tuple(p) for p, k in zip(points, keep) if k]
 
 
 # グローバルな描画・監視状態
@@ -2247,6 +2568,7 @@ def redraw_all_paths():
 
 def main():
     global args, data_dir, img_path, binary, binary_for_pf, dist_map, h, w, route_mask, fig, ax
+    global ROUTE_POINTS
 
     args = parse_args()
     numeric_level = getattr(logging, args.log_level.upper(), None)
@@ -2267,12 +2589,30 @@ def main():
         raise FileNotFoundError(f"CSVフォルダが見つかりません: {data_dir}")
     if ROUTE_SOURCE == "auto":
         route_mask = extract_auto_route_mask(
-            binary_for_pf, AUTO_ROUTE_MAX_HALF_WIDTH_PX, AUTO_ROUTE_DILATION_PX
+            binary_for_pf, AUTO_ROUTE_MAX_HALF_WIDTH_PX, AUTO_ROUTE_DILATION_PX,
+            exclude_wide_rooms=AUTO_ROUTE_EXCLUDE_WIDE_ROOMS,
+            exclude_wide_rooms_radius_px=AUTO_ROUTE_EXCLUDE_WIDE_ROOMS_RADIUS_PX,
         )
         logging.info(
             f"自動抽出した通路マスク: 有効画素数={int(route_mask.sum())}/{route_mask.size} "
             f"(半径閾値={AUTO_ROUTE_MAX_HALF_WIDTH_PX:.1f}px, 膨張={AUTO_ROUTE_DILATION_PX:.1f}px)"
         )
+        if AUTO_ROUTE_CENTERLINE_ENABLED:
+            centerline_points = extract_ordered_centerline(
+                route_mask, AUTO_ROUTE_CENTERLINE_SIMPLIFY_PX
+            )
+            if len(centerline_points) >= 2:
+                ROUTE_POINTS = centerline_points
+                logging.info(
+                    f"自動抽出した通路中心線: {len(ROUTE_POINTS)}点 "
+                    f"(簡略化閾値={AUTO_ROUTE_CENTERLINE_SIMPLIFY_PX:.1f}px) "
+                    f"→ 曲がり角連動の方位補正が有効になります"
+                )
+            else:
+                logging.warning(
+                    "route_source=autoで通路中心線を抽出できませんでした。"
+                    "方位補正は無効のままです(従来通り空間マスクのみ)。"
+                )
     else:
         route_mask = build_route_mask(binary.shape)
 

@@ -1,0 +1,4 @@
+# pdr_pf_improved.py extract_auto_route_mask()のexclude_wide_rooms修正の効果検証。map_configs/kanri_4f.json、pdr_log_0805_1438/1441/1442.csv対象、seed={1,7,42,100,777,2024}×2条件(baseline=旧マスク/修正後=exclude_wide_rooms+centerline有効)。baselineは2026-08-15記録のauto-enforce基準値(15.6回,339.9px)と一致。詳細はmemo/route_source_auto.md参照。
+condition,n,extinctions_total,extinctions_mean,err_x_mean_px
+baseline,18,280,15.56,339.9
+exclude_wide_rooms+centerline,18,233,12.94,276.9
