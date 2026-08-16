@@ -2,6 +2,23 @@
 # check_sensor_quality.py
 #
 # 【変更履歴】
+# - 2026-08-16: コード肥大化対策として、fake_args組み立てコード(pick_landmarks.py
+#               ・verify_route_graph.pyと3重に重複していた)をpdr_pf_improved.py側の
+#               load_map_config_for_tool()に一本化し、このスクリプトはそれを
+#               呼ぶだけにした。診断ロジック自体に変更はない。
+# - 2026-08-16: pdr_pf_improved.py側でapply_map_config()がmulti_hypothesis_
+#               routing_enabled等の新しいargs属性を参照するようになった
+#               (2026-08-16の複数経路仮説PF追加)ため、再びfake_argsに存在しない
+#               属性を読もうとしてAttributeErrorで落ちるようになっていた
+#               (verify_route_graph.pyの動作確認で発見。前回と同種の問題)。
+#               fake_argsに不足していた属性を追加して修正。診断ロジック自体に
+#               変更はない。
+# - 2026-08-16: pdr_pf_improved.py側でapply_map_config()がauto_route_exclude_
+#               wide_rooms等の新しいargs属性を参照するようになった(2026-08-16の
+#               exclude_wide_rooms追加)ため、本スクリプトのfake_argsに存在しない
+#               属性を読もうとしてAttributeErrorで落ちるようになっていた
+#               (pick_landmarks.py作成時の動作確認で発見)。fake_argsに不足して
+#               いた属性を追加して修正。診断ロジック自体に変更はない。
 # - 2026-08-15: 新規作成。CSVごとのジャイロ/加速度/yaw_degの品質を定量化する
 #               読み取り専用の診断ツール。
 #
@@ -112,13 +129,7 @@ def main():
 
     # pdr_pf_improved.pyのapply_map_config()をそのまま流用し、data_dir/gyro_unit/
     # turn_yaw_rate_threshold/exclude_csvをJSONから一貫した形で取得する。
-    fake_args = argparse.Namespace(
-        data_dir=None, map=None, route_constraint_mode=None, route_source=None,
-        auto_route_dilation_px=None, target_distance_px=None, step_gain=None,
-        pf_erosion_radius_px=None,
-    )
-    map_config, map_config_path = pdrmod.load_map_config(args_cli.map_config)
-    pdrmod.apply_map_config(fake_args, map_config, map_config_path)
+    _map_config, fake_args = pdrmod.load_map_config_for_tool(args_cli.map_config)
 
     data_dir = fake_args.data_dir
     file_list = sorted(data_dir.glob("pdr_log_*.csv"))

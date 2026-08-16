@@ -2,12 +2,26 @@
 
 ## 必須方針
 
+- **2026-08-16、現行プログラム一式を `pdr_program/` フォルダへ集約した。**
+  `pdr_pf_improved.py`・`pdr_route_graph.py`・検証ツール群・`map_configs/`・
+  `results/`・`start_positions.csv`・`CHANGELOG.md`はすべて`pdr_program/`配下。
+  以下のこのファイル内のパス表記(`pdr_pf_improved.py`、`map_configs/*.json`等)は
+  すべて`pdr_program/`からの相対パスとして読むこと。全体構成は
+  [pdr_program/README.md](pdr_program/README.md)参照。
 - 常に日本語で回答し、コメント・docstring・ログも原則日本語にする。
-- 現行の編集対象は `pdr_pf_improved.py`。他の大規模PFスクリプトは参照用で、明示指示がない限り変更しない。
+- 現行の編集対象は `pdr_program/pdr_pf_improved.py`。ただし2026-08-16にファイル
+  肥大化(3500行超)対策として経路帯マスク抽出・通路グラフ化関連の関数を
+  `pdr_program/pdr_route_graph.py` へ切り出した。こちらも同じプログラムの一部として
+  通常通り編集対象に含める(`pdr_pf_improved.py`冒頭で
+  `from pdr_route_graph import (...)`しているだけで、呼び出し方は従来通り)。
+  他の大規模PFスクリプト(`pdr_pf_clickstart.py`等、リポジトリ直下に残したまま)は
+  引き続き参照用で、明示指示がない限り変更しない。
 - リポジトリ内の実行・編集は確認不要。ただし、削除、リモートへのpush、リポジトリ外への破壊的操作は行わない。
 - 入力CSV（`pdr_log_*.csv`）は絶対に変更しない。変換はメモリ上で行う。`start_positions.csv`への既存仕様上の書き込みのみ例外。
 - 実行ごとに結果PNGを必ず保存する。`--save`未指定時も `results/` へ自動保存する挙動を維持する。
-- `pdr_pf_improved.py`を変更したら、冒頭の変更履歴へ絶対日付付きで1項目追加する。
+- `pdr_pf_improved.py`または`pdr_route_graph.py`を変更したら、`CHANGELOG.md`の先頭へ
+  絶対日付付きで1項目追加する(2026-08-16に冒頭コメントの変更履歴が肥大化したため
+  `CHANGELOG.md`へ切り出した。`pdr_pf_improved.py`冒頭には直近数件のみ残す運用)。
 - 過去の詳しい調査経緯・却下した仮説が必要な場合のみ `memo/` を参照する(索引:
   [CLAUDE_MEMO.md](CLAUDE_MEMO.md)。関係するトピックのファイルだけ読む — 全文は
   読まない。`pdr-memo-lookup` skillが絞り込みを助ける)。非自明な決定をしたら
@@ -45,9 +59,12 @@
 
 ## 実行と確認
 
+すべて`pdr_program/`ディレクトリ内で実行する(`cd pdr_program`してから)。
+
 基本実行例:
 
 ```bash
+cd pdr_program
 python pdr_pf_improved.py \
   --map-config map_configs/kanri_4f.json \
   --no-watch --no-show --seed 42
@@ -56,6 +73,7 @@ python pdr_pf_improved.py \
 主な比較:
 
 ```bash
+cd pdr_program
 python compare_route_source.py --seeds 1 7 42 100 777 2024
 ```
 
@@ -69,17 +87,19 @@ python compare_route_source.py --seeds 1 7 42 100 777 2024
 
 ## 記録先
 
-- コード変更内容: `pdr_pf_improved.py` 冒頭の変更履歴
-- 詳細な実験条件・数値: `results/` 内のCSV・PNG・実験ログ
+- コード変更内容: `pdr_program/CHANGELOG.md`(旧: `pdr_pf_improved.py` 冒頭の変更履歴。2026-08-16に分離)
+- 詳細な実験条件・数値: `pdr_program/results/` 内のCSV・PNG・実験ログ
 - 卒研全体の進捗・研究判断・論文構成: `../研究計画系/進捗反映版メモ.txt`(このリポジトリの外、`卒業研究/研究計画系/`にある。パスを省略して探すとi22satou直下に同名の別ファイルを誤って作成しがちなので注意)
 - 過去の詳しい調査記録・却下した仮説: `memo/`(索引: `CLAUDE_MEMO.md`。トピック別、関係する1ファイルだけ読む)
 - 通常作業では、この `CLAUDE.md` 以外を自動的に全文参照しない。
 
 ## 構成上の注意
 
-- 設定は `map_configs/*.json`。必須値の欠落はエラーにする。
+- 設定は `pdr_program/map_configs/*.json`。必須値の欠落はエラーにする。
 - 生データはリポジトリ外を含む。パスやデータを勝手に変更しない。
-- `pdr_pf_clickstart.py` は旧版、その他の `test*.py` 等は原則履歴・参照用(`削除候補/`にあるものは移動済みで未削除)。
+- リポジトリ直下に残した `pdr_pf_clickstart.py`(旧版)、`test7.py`/`L.png`(初期の
+  L字検証、現行パイプラインとは独立、詳細はmemo/file_cleanup.md)は原則履歴・参照用。
+  その他の `test*.py` 等も同様(`削除候補/`にあるものは移動済みで未削除)。
 - 研究計画、章構成、進捗判定が必要な作業だけ `進捗反映版メモ.txt` を参照する。通常の小修正では全文を毎回読まない。
 
 ## このファイルの維持方針

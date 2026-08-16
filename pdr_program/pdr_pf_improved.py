@@ -2,129 +2,17 @@
 # pdr_pf_improved.py
 #
 # 【変更履歴】
-# - 2026-08-16: [本研究独自] extract_auto_route_mask()に、大きな部屋の壁際の帯を
-#               通路候補から除外するexclude_wide_rooms引数を追加(既定False、既存の
-#               route_source=auto比較実験の結果は変更しない)。半径max_half_width_px
-#               の円盤でfreeをモルフォロジー開放し、その結果(円盤が収まるほど広い
-#               領域=部屋の内部)を通路候補から差し引く。CLI
-#               --auto-route-exclude-wide-rooms/JSON auto_route_exclude_wide_roomsで
-#               有効化。原因調査(直前のコメント訂正2件)を踏まえた対策の実装。
-# - 2026-08-16: extract_ordered_centerline()のコメントを再訂正(原因の特定)。
-#               kanri_4f_preview_final3.png(生成時の壁検出結果がそのまま残っている
-#               確認用画像)と実際の平面図を1px単位で照合した結果、「輪」に見える
-#               原因は2つの組み合わせと判明した: (1)西側廊下・東側廊下(高さが異なる)
-#               を繋ぐホール・階段は実在する正しい接続、(2)もう一方は
-#               extract_auto_route_mask()が大きな部屋の壁際の帯を通路と区別できず、
-#               たまたま別の階段の踊り場まで繋がって見える見せかけの経路。壁検出自体
-#               (文字を壁と誤認しないための水平・垂直線分抽出)は平面図と照合して
-#               正確だったため、原因は文字認識の問題ではなく、通路と部屋の壁際を
-#               区別できないマスク生成方式そのものの設計限界だった。安全装置の実装・
-#               挙動・検証結果に変更はない(詳細はmemo/route_source_auto.md)。
-# - 2026-08-16: extract_ordered_centerline()のコメントを訂正。kanri_4f.jpgで
-#               単体検証中に発見した「2本の帯が両端付近で連結して見える」構造を、
-#               当初は「通路網が輪(ループ)になっている」と誤って解釈していたが、
-#               ユーザーから実際の平面図(PDF)で「両端はそれぞれ別の階段(3Fへの階段・
-#               屋外階段)であり、通路同士が直接繋がっているわけではない」との訂正を
-#               受けた。安全装置(迂回率チェック)自体の実装・挙動・検証結果に変更は
-#               ないが、その原因についての説明(コメント・memo)を訂正した
-#               (詳細はmemo/route_source_auto.md)。
-# - 2026-08-16: [本研究独自] route_source=autoでも曲がり角連動の方位補正
-#               (route_guidance_enabled系)が働くよう、自動抽出した経路帯マスクを
-#               細線化(skimage.morphology.skeletonize)して1本の順序付き中心線を
-#               抽出し、簡略化(RDP法)した上でROUTE_POINTSとして使う機能を追加
-#               (extract_ordered_centerline())。既定は無効
-#               (--auto-route-centerline/JSON auto_route_centerline_enabled、
-#               無指定ならFalseで従来通りroute_pointsは空のまま)。現在の実測データ
-#               (0805系)の通路は分岐のない単純な形状であることを確認済みのため、
-#               骨格化後の小さな分岐・突起はノイズとみなし、最も長い経路(木の直径)
-#               1本だけを採用する簡易版とした(分岐を含む通路網への対応=§6.2の
-#               完全版は今後の課題のまま)。経路帯マスク自体(extract_auto_route_mask)
-#               や既定OFF時の挙動は変更していない。新規依存としてscikit-image
-#               (skimage)を追加(環境には導入済み、extract_auto_route_mask設計時の
-#               「新規ライブラリ依存なし」方針からの変更。詳細はmemo/route_source_auto.md)。
-# - 2026-08-16: 不確実性適応粒子数の4パラメータ(neff_low_ratio/neff_high_ratio/
-#               boost_factor/shrink_factor)をCLIから個別に上書きできる引数
-#               (--uncertainty-neff-low-ratio等)を追加。挙動自体は変更せず、
-#               感度分析(sensitivity_uncertainty_particles.py)がJSON設定ファイルを
-#               増やさずにパラメータを振れるようにするための追加のみ。
-# - 2026-08-15: [本研究独自] 不確実性適応粒子数(進捗反映版メモ.txt §6.5相当)を追加。
-#               直前ステップの実効サンプルサイズ(Neff)を粒子数に対する比率(neff_ratio)
-#               で見て、移動様態ベースの粒子数(先行研究の枠組み)をさらに増減させる
-#               (ParticleFilterPDR.configure_behavior())。--uncertainty-adaptive-particles
-#               /--no-uncertainty-adaptive-particles、またはJSON adaptive_pf内の
-#               uncertainty_adaptive_particles等で切り替え、既定は無効(既存挙動を維持)。
-#               有効化するとNeffという既に計算済みだが未使用だった診断値を初めて
-#               粒子数制御に使う。compare_route_source.pyにauto-enforce-unc条件として
-#               追加し検証中(詳細はCLAUDE_MEMO.md)。
-# - 2026-08-15: extract_auto_route_mask()に緩和的膨張オプション(dilation_px、
-#               --auto-route-dilation-px/JSON auto_route_dilation_px、既定0px)を追加。
-#               「自動マスクが実際の廊下幅に忠実なせいで手動の一様バッファより制約が
-#               厳しくなり全滅回数が増える」という仮説を検証する目的だったが、0〜10px
-#               で振っても全滅回数はほぼ変化せず仮説は棄却された(詳細はCLAUDE_MEMO.md)。
-#               機能自体は今後のチューニング用に残す(既定0pxで従来通りの挙動)。
-# - 2026-08-15: [本研究独自] 経路帯マスクを手動route_pointsに頼らず、二値地図から
-#               自動抽出できるようにした(--route-source {manual,auto}、既定はmanual
-#               で従来通り)。extract_auto_route_mask()が「壁までの距離が
-#               auto_route_max_half_width_px(既定20px)以下の移動可能領域」を通路候補とし、
-#               そのうち最大連結成分を通路網として採用する(広い部屋は距離が大きく候補から
-#               自然に外れる)。座標を一切与えずにkanri_4f.jpgの実廊下形状を高精度に再現
-#               できることを可視化で確認済み(詳細はCLAUDE_MEMO.md)。route_source=autoの
-#               場合はJSONのroute_pointsを意図的に無視する(手動座標ゼロにするため)ので、
-#               route_guidance_enabled()系の曲がり角連動方位補正は現状autoでは働かない
-#               (空間的な経路帯制約のみ。今後の課題)。
-# - 2026-08-15: 未使用コードを削除しファイル総行数を縮小。
-#               (1) 未使用import(dataclass)を削除。
-#               (2) 呼び出し箇所が一つもなかったestimate_step_length_px()
-#                   (Weinberg法の予備実装)とWEINBERG_K定数を削除。
-#               (3) START_X/START_Y(JSON任意設定"start"由来)を削除。実際の
-#                   PF開始位置はstart_positions.csv/クリック選択で決まっており
-#                   一切影響していなかった上、ログに実態と異なる開始位置を
-#                   出力していたため。
-# - 2026-08-15: 地図設定JSONに任意設定"exclude_csv"を追加。別の図(L字経路用など)で
-#               使用中のCSVをファイル名指定でこのJSONの実行対象から除外できるように
-#               した(redraw_all_paths()のファイル一覧構築時にフィルタ)。
-# - 2026-08-15: CLAUDE.mdで指摘されていたpdr_pf_clickstart.pyとの残る差分を解消。
-#               (1) --save未指定時にPNGが1枚も保存されない問題を修正し、
-#                   pdr_pf_clickstart.py同様resultsディレクトリへ実行日時・
-#                   経路制約モード・乱数シードを含む名前で自動保存するようにした。
-#               (2) apply_map_config()がconfig.get(key, 旧デフォルト値)で
-#                   設定漏れを黙って握り潰していた(ヘッダーの「設定漏れはエラー」
-#                   という記述と矛盾)問題を、require_config_value()による必須
-#                   チェックへ統一して解消(pdr_pf_clickstart.py同様の挙動)。
-#               (3) --heading-source androidをyaw_deg列の無いCSVに使った際の
-#                   ValueErrorがredraw_all_paths()のループ外まで伝播し、
-#                   以降のCSVを1枚も処理できずバッチ全体が止まっていた問題を、
-#                   該当ファイルだけスキップするtry/exceptで解消。
-#               (4) [SmartPDR]/[先行研究:移動様態PF]/[本研究独自]の出典タグと、
-#                   研究的位置づけの説明コメントをpdr_pf_clickstart.pyから移植。
-# - 2026-08-15: route_constraint_mode=enforceで全粒子の重みが0になった際の
-#               自己リカバリ処理に経路マスク条件を追加。従来はbinary_for_pf
-#               (物理壁)のみを条件に再配置していたため、全滅からの回復時に
-#               粒子群が経路コリドー外(隣室など)へ漏れ出す場合があった
-#               (is_in_wall()自体は経路を見ない設計のまま据え置き、
-#               診断指標valid_ratio_history/route_ratio_historyの分離も維持)。
-# - 2026-08-05: CSVごとの既知開始位置を地図クリックで登録し、
-#               start_positions.csvから再利用する機能を追加。
-# - 2026-08-06: JSONで管理する地図・PF設定値をコード先頭の固定値から削除し、
-#               設定漏れは起動時にエラーとして検出するように整理。
-# - 2026-08-06: 経路マスク外を移動不可領域として扱えるようにし、
-#               部屋側へ推定経路が流れる表示を抑制。
-#               設定経路の破線描画も削除。
-# - 2026-08-06: 手動L字経路への依存を比較条件として分離するため、
-#               route_constraint_modeのnone、prefer、enforceを追加。
-# - 2026-08-06: 計測開始時のセンサ方位を地図座標系へ合わせる
-#               初期方位補正を追加。
-# - 2026-08-06: 方位推定方法として、従来のジャイロ・Madgwick方式と、
-#               AndroidのTYPE_ROTATION_VECTORから記録したyaw_degを
-#               選択できる機能を追加。
-# - 2026-08-06: クリックした開始位置に最も近いroute_pointsの線分を選び、
-#               その線分を最初の経路線分として使用する処理を追加。
-# - 2026-08-06: 開始位置、経路制約モード、方位推定方法、
-#               初期方位、経路重みなどをキャッシュ判定へ追加。
-# - 2026-08-06: 有効粒子率、経路内粒子率、Neff、位置分散を記録し、
-#               CSVごとのPF診断値としてログ出力する機能を追加。
-# - 2026-08-06: 結果画像の凡例とタイトルを整理し、
-#               経路制約モードと方位推定方法を画像上へ表示。
+# 全履歴はCHANGELOG.md参照(2026-08-16にここから切り出した)。変更したら
+# CHANGELOG.mdの先頭に日付付きで1項目追加すること。直近の変更のみ下記に残す:
+# - 2026-08-16: [本研究独自] コード肥大化対策(3500行超)の一環として、
+#               経路帯マスク・通路グラフ関連の関数をpdr_route_graph.pyへ切り出し、
+#               検証スクリプト3本のfake_args重複をload_map_config_for_tool()へ
+#               一本化し、この変更履歴自体もCHANGELOG.mdへ切り出した
+#               (3506行→約2700行)。関数の中身・挙動は変更していない。
+# - 2026-08-16: [本研究独自] 複数経路仮説PF(粒子単位のグラフ分岐PF方式)の
+#               第一段階として、build_route_graph_topology()・
+#               nearest_edge_position()・ParticleFilterPDRへの接続を実装。
+#               --multi-hypothesis-routing(既定OFF)で有効化。詳細はCHANGELOG.md。
 #
 # 【既知開始位置の設定】
 # - 未登録のPDRデータは、地図上で実際の計測開始位置をクリックして指定する。
@@ -405,6 +293,19 @@ from PIL import Image
 # (extract_ordered_centerline)。新規ライブラリ依存(既に環境に導入済み)。
 from skimage.morphology import skeletonize
 
+# [本研究独自] 経路帯マスク抽出・通路グラフ化関連の関数群(2026-08-16、ファイル
+# 肥大化を受けてpdr_route_graph.pyへ切り出した)。関数の中身は移動前と完全に同じで、
+# ここで再importすることで、このファイル内・他スクリプトからの呼び出し方は
+# 従来通り(pdr_pf_improved.build_skeleton_graph(...)等)のまま変更していない。
+from pdr_route_graph import (
+    extract_auto_route_mask,
+    extract_ordered_centerline,
+    build_skeleton_graph,
+    simplify_skeleton_graph,
+    build_route_graph_topology,
+    nearest_edge_position,
+)
+
 try:
     import japanize_matplotlib  # 日本語用のライブラリ
 except ImportError:
@@ -469,6 +370,14 @@ AUTO_ROUTE_CENTERLINE_SIMPLIFY_PX = 10.0
 # 諦める(extract_ordered_centerline参照)。CLI/JSONでは調整不要な内部安全弁のため
 # 定数のまま(単純なL字・コの字程度の通路なら通常2倍を大きく超えない)。
 AUTO_ROUTE_CENTERLINE_MAX_DETOUR_RATIO = 2.5
+# [本研究独自] 複数経路仮説PF(粒子単位のグラフ分岐)。既定は無効。有効時は
+# route_source=autoの経路帯マスクからbuild_skeleton_graph()・
+# simplify_skeleton_graph()・build_route_graph_topology()で通路グラフを作り、
+# ParticleFilterPDRへ渡す(main()参照)。AUTO_ROUTE_CENTERLINE_ENABLEDとは
+# 「1本の経路を仮定するか、分岐を扱うか」で排他的(両方有効はapply_map_configで
+# エラーにする)。
+MULTI_HYPOTHESIS_ROUTING_ENABLED = False
+MULTI_HYPOTHESIS_ROUTING_SIMPLIFY_PX = 10.0
 GYRO_UNIT = "rad"
 # 別の図(L字経路用など)で使用しており、このJSONの実行対象からは除外したいCSVファイル名。
 # map_configs/*.jsonの"exclude_csv"(任意設定)から読み込む。ファイル名の完全一致で判定する。
@@ -861,7 +770,8 @@ class ParticleFilterPDR:
     """パーティクルフィルタの状態、重み更新、衝突判定、および
     リサンプリング処理を完全にカプセル化したクラス。
     """
-    def __init__(self, n_particles, start_x, start_y, route_mask, binary_for_pf, dist_map, params):
+    def __init__(self, n_particles, start_x, start_y, route_mask, binary_for_pf, dist_map, params,
+                 route_topology=None):
         self.n_particles = n_particles
         self.start_x = start_x
         self.start_y = start_y
@@ -870,14 +780,33 @@ class ParticleFilterPDR:
         self.dist_map = dist_map
         self.h, self.w = binary_for_pf.shape
         self.params = params
+        # [本研究独自] 複数経路仮説PF(粒子単位のグラフ分岐)。Noneなら従来通り
+        # 位置(x, y)のみの粒子を使う(既定の挙動は変更しない)。設定時は
+        # build_route_graph_topology()の戻り値を渡す。各粒子はさらに
+        # (現在のエッジid, エッジ内の区間index, 進行方向+1/-1)を保持する。
+        self.route_topology = route_topology
         self.reset()
 
     def reset(self):
         """パーティクルと状態の初期化"""
-        self.particles = np.column_stack([
-            self.start_x + np.random.normal(0, 2, self.n_particles),
-            self.start_y + np.random.normal(0, 2, self.n_particles)
-        ])
+        if self.route_topology is not None:
+            # 列: [x, y, edge_id, seg_index, direction]。edge_id等はここでは
+            # 仮の0で埋める。進行方向(direction)の決定には歩行開始時のセンサー
+            # 方位が必要だが、reset()の時点(コンストラクタ内)ではまだ計算されて
+            # いないため、実際の値はinitialize_route_state()を呼び出し側(main())
+            # から別途呼んで設定する。
+            self.particles = np.column_stack([
+                self.start_x + np.random.normal(0, 2, self.n_particles),
+                self.start_y + np.random.normal(0, 2, self.n_particles),
+                np.zeros(self.n_particles),
+                np.zeros(self.n_particles),
+                np.ones(self.n_particles),
+            ])
+        else:
+            self.particles = np.column_stack([
+                self.start_x + np.random.normal(0, 2, self.n_particles),
+                self.start_y + np.random.normal(0, 2, self.n_particles)
+            ])
         self.weights = np.full(self.n_particles, 1.0 / self.n_particles)
         self.pos_buffer = collections.deque(maxlen=self.params.get('smooth_window', 2))
         self.estimated_positions = []
@@ -953,6 +882,151 @@ class ParticleFilterPDR:
         self.params["sigma_step"] = behavior_params["sigma_step"]
         self.params["sigma_angle"] = behavior_params["sigma_angle"]
 
+    # --------------------------------------------------------------
+    # [本研究独自] 複数経路仮説PF(粒子単位のグラフ分岐)
+    # --------------------------------------------------------------
+    # route_topology(build_route_graph_topology()の戻り値)が設定されている場合の
+    # み使う一連のメソッド。self.particlesの列2〜4(edge_id, seg_index, direction)
+    # を管理する。route_topology=None(既定)では一切呼ばれず、既存の挙動を変えない。
+
+    def initialize_route_state(self, x, y, heading_hint):
+        """開始位置(x, y)に最も近いエッジ・区間へ全粒子を割り当てる。
+
+        heading_hintは歩行開始時点の地図座標系での推定方位(rad)。区間の
+        前進方向・逆方向のうち、heading_hintに近い方を進行方向として採用する
+        (地図上は同じ通路でも、歩く向きが分からないと方位補正の符号を
+        決められないため)。route_topology未設定時は何もしない。
+        """
+        if self.route_topology is None:
+            return
+        edge_id, seg_index, _t = nearest_edge_position(self.route_topology, x, y)
+        if edge_id is None:
+            logging.warning(
+                "複数経路仮説PF: 開始位置(%.1f, %.1f)に対応する通路グラフの"
+                "エッジが見つかりません。経路方位補正なしで続行します。", x, y,
+            )
+            return
+        edge = self.route_topology["edges_by_id"][edge_id]
+        n_seg = len(edge["seg_headings"])
+        seg_index = int(np.clip(seg_index, 0, n_seg - 1))
+        seg_heading = edge["seg_headings"][seg_index]
+        forward_diff = abs(angle_diff(heading_hint, seg_heading))
+        backward_diff = abs(angle_diff(heading_hint, normalize_angle(seg_heading + np.pi)))
+        direction = 1.0 if forward_diff <= backward_diff else -1.0
+        # directionの定義(_advance_route_state/_route_corrected_headingsと共通):
+        # +1ならseg_indexはpoints[0]側から数えた区間番号、-1ならpoints[-1]側から
+        # 数えた区間番号。nearest_edge_position()はpoints配列そのままの順で区間を
+        # 返すため、-1を選んだ場合はseg_indexを「to側から数えた番号」に変換する。
+        if direction < 0:
+            seg_index = (n_seg - 1) - seg_index
+        self.particles[:, 2] = float(edge_id)
+        self.particles[:, 3] = float(seg_index)
+        self.particles[:, 4] = direction
+        logging.info(
+            "複数経路仮説PF: 開始エッジ=%d (%d->%d), 区間=%d/%d, 進行方向=%s",
+            edge_id, edge["from"], edge["to"], seg_index, n_seg,
+            "forward" if direction > 0 else "backward",
+        )
+
+    def _route_corrected_headings(self, sensor_step_heading):
+        """粒子ごとの現在エッジ・区間の方位とセンサー方位を重み付き融合する
+        (correct_heading_with_route_segment()の粒子版)。エッジをまたいで
+        ループするのではなく、エッジ単位でまとめてブロードキャスト計算する
+        (エッジ数は粒子数よりずっと少ないため)。
+        """
+        if ROUTE_HEADING_WEIGHT <= 0:
+            return np.full(self.n_particles, sensor_step_heading)
+
+        edge_ids = self.particles[:, 2].astype(int)
+        seg_indices = self.particles[:, 3].astype(int)
+        directions = self.particles[:, 4]
+        route_headings = np.zeros(self.n_particles)
+
+        for edge_id, edge in self.route_topology["edges_by_id"].items():
+            mask = edge_ids == edge_id
+            if not np.any(mask):
+                continue
+            seg_headings = edge["seg_headings"]
+            n_seg = len(seg_headings)
+            idx = np.clip(seg_indices[mask], 0, n_seg - 1)
+            dir_mask = directions[mask]
+            # direction=+1: そのままseg_headings[idx]。-1: to側から数えた区間なので
+            # 物理的な区間番号は(n_seg-1-idx)で、方位は反転させる。
+            physical_idx = np.where(dir_mask > 0, idx, (n_seg - 1) - idx)
+            h = seg_headings[physical_idx]
+            h = np.where(dir_mask > 0, h, h + np.pi)
+            route_headings[mask] = h
+
+        sin_sum = np.sin(sensor_step_heading) + np.sin(route_headings) * ROUTE_HEADING_WEIGHT
+        cos_sum = np.cos(sensor_step_heading) + np.cos(route_headings) * ROUTE_HEADING_WEIGHT
+        return np.arctan2(sin_sum, cos_sum)
+
+    def _advance_route_state(self):
+        """各粒子の現在位置がエッジ区間の終点(次の曲がり角、またはノード)に
+        ROUTE_CORNER_THRESHOLD_PX以内まで近づいたら、区間を1つ進める。エッジの
+        終端(ノード)に達した粒子は、そのノードに接続する他のエッジの中から
+        次の進行先をランダムに選ぶ(交差点での分岐=複数経路仮説の枝分かれ)。
+        来た道をそのまま戻る選択肢は、他に行き先がある限り除外する(行き止まり
+        =端点ノードでは選択肢が無いので、そのまま引き返す)。
+        分岐後にどの仮説が正しいかは、この後の通常の重み付け・リサンプリング
+        (壁尤度・経路帯マスク・方位整合度)で自然に選別される。
+        """
+        edge_ids = self.particles[:, 2].astype(int)
+        seg_indices = self.particles[:, 3].astype(int)
+        directions = self.particles[:, 4]
+        xs = self.particles[:, 0]
+        ys = self.particles[:, 1]
+
+        edges_by_id = self.route_topology["edges_by_id"]
+        adjacency = self.route_topology["adjacency"]
+
+        new_edge_ids = edge_ids.copy()
+        new_seg_indices = seg_indices.copy()
+        new_directions = directions.copy()
+
+        for edge_id, edge in edges_by_id.items():
+            mask = edge_ids == edge_id
+            if not np.any(mask):
+                continue
+            points = np.asarray(edge["points"])
+            n_seg = len(edge["seg_headings"])
+            idxs_global = np.where(mask)[0]
+            idx = np.clip(seg_indices[mask], 0, n_seg - 1)
+            dir_mask = directions[mask]
+
+            physical_idx = np.where(dir_mask > 0, idx, (n_seg - 1) - idx)
+            target_point_idx = np.where(dir_mask > 0, physical_idx + 1, physical_idx)
+            target_points = points[target_point_idx]
+            dist_to_target = np.hypot(
+                xs[mask] - target_points[:, 0], ys[mask] - target_points[:, 1]
+            )
+            reached = dist_to_target <= ROUTE_CORNER_THRESHOLD_PX
+
+            # エッジ途中: 次の区間へ進むだけ。
+            mid_reach = reached & (idx < n_seg - 1)
+            new_seg_indices[idxs_global[mid_reach]] = idx[mid_reach] + 1
+
+            # エッジの終端(ノード)に到達: 接続エッジから次の進行先を選ぶ。
+            end_reach = reached & (idx >= n_seg - 1)
+            for local_i in np.where(end_reach)[0]:
+                gi = idxs_global[local_i]
+                d = dir_mask[local_i]
+                node_id = edge["to"] if d > 0 else edge["from"]
+                candidates = adjacency.get(node_id, [])
+                if not candidates:
+                    continue  # 通常起きない(終端ノードは必ず自エッジを含む)
+                backtrack = (edge_id, -1 if d > 0 else 1)
+                non_backtrack = [c for c in candidates if c != backtrack]
+                choices = non_backtrack if non_backtrack else candidates
+                new_edge_id, new_direction = choices[np.random.randint(len(choices))]
+                new_edge_ids[gi] = new_edge_id
+                new_seg_indices[gi] = 0
+                new_directions[gi] = float(new_direction)
+
+        self.particles[:, 2] = new_edge_ids
+        self.particles[:, 3] = new_seg_indices
+        self.particles[:, 4] = new_directions
+
     def is_in_wall(self, x, y):
         """座標が壁の中、または地図範囲外にあるかを判定する（境界条件の厳格化）。
         範囲外は全て壁（移動不可）として安全に処理します。
@@ -1000,11 +1074,20 @@ class ParticleFilterPDR:
         """移動様態に応じた粒子数・分散で1歩分のPF更新を実行する。"""
         self.configure_behavior(behavior)
 
+        # [本研究独自] 複数経路仮説PF: 粒子ごとに現在のエッジ・区間を進め
+        # (交差点では接続エッジへ確率的に分岐)、粒子ごとの区間方位でセンサー
+        # 方位を補正する。route_topology未設定時はstep_headingを従来通りの
+        # スカラーのまま使う(既存の単一経路モード・経路制約なしモードは無変更)。
+        corrected_step_heading = step_heading
+        if self.route_topology is not None:
+            self._advance_route_state()
+            corrected_step_heading = self._route_corrected_headings(step_heading)
+
         # 1. 状態遷移（移動様態ごとのノイズ付与）
         noise_dist = np.random.normal(0, self.params['sigma_step'], self.n_particles)
         noise_angle = np.random.normal(0, self.params['sigma_angle'], self.n_particles)
         move = step_px + noise_dist
-        p_angle = step_heading + noise_angle
+        p_angle = corrected_step_heading + noise_angle
 
         new_particles = self.particles.copy()
         new_particles[:, 0] += move * np.cos(p_angle)
@@ -1041,7 +1124,7 @@ class ParticleFilterPDR:
         self.position_spread_history.append(float(spread))
         
         # 方位ズレの重み
-        particle_heading_error = angle_diff(p_angle, step_heading)
+        particle_heading_error = angle_diff(p_angle, corrected_step_heading)
         weights *= np.exp(
             -(particle_heading_error ** 2) /
             (2 * self.params['sigma_angle'] ** 2)
@@ -1061,7 +1144,10 @@ class ParticleFilterPDR:
             self.neff_history.append(0.0)
             # 粒子全滅時の自己リカバリ
             self.extinction_count += 1
-            ref_x, ref_y = np.mean(self.particles, axis=0)
+            # [本研究独自] 複数経路仮説PF使用時、self.particlesは(x, y, edge_id,
+            # seg_index, direction)の5列になっているため、位置(x, y)の平均は
+            # 先頭2列だけを使う。
+            ref_x, ref_y = np.mean(self.particles[:, :2], axis=0)
             self.particles[:, 0] = ref_x + np.random.normal(0, self.params['recovery_sigma'], self.n_particles)
             self.particles[:, 1] = ref_y + np.random.normal(0, self.params['recovery_sigma'], self.n_particles)
 
@@ -1083,6 +1169,13 @@ class ParticleFilterPDR:
                     self.particles[:, 0] = new_x
                     self.particles[:, 1] = new_y
                     break
+            # [本研究独自] 複数経路仮説PF: リカバリで全粒子がref_x, ref_y付近へ
+            # テレポートしたため、edge_id/seg_index/directionも新しい位置に
+            # 合わせて再割り当てする(古いエッジ情報を持ち越すと、以後
+            # _advance_route_state()がそのエッジの終点へ辿り着くまで方位補正が
+            # 実際の位置と無関係な値のままになってしまうため)。
+            if self.route_topology is not None:
+                self.initialize_route_state(ref_x, ref_y, step_heading)
             self.weights = np.full(self.n_particles, 1.0 / self.n_particles)
 
         # 5. 重み付き平均による現在位置の推定（移動平均で平滑化）
@@ -1130,6 +1223,15 @@ def parse_args():
         "--no-show",
         action="store_true",
         help="グラフウィンドウを表示しません。--save と併用すると便利です。",
+    )
+    parser.add_argument(
+        "--save-trajectory-csv",
+        action="store_true",
+        help=(
+            "[本研究独自] CSVごとの推定軌跡(timestamp, x_px, y_px)をRESULTS_DIR"
+            "以下へ別CSVとして保存します(既定では保存しません)。正解位置データと"
+            "突き合わせてRMSE等を計算する評価用(evaluate_accuracy.py参照)。"
+        ),
     )
     parser.add_argument(
         "--seed",
@@ -1250,6 +1352,34 @@ def parse_args():
         ),
     )
     parser.add_argument(
+        "--multi-hypothesis-routing",
+        dest="multi_hypothesis_routing_enabled",
+        action="store_true",
+        default=None,
+        help=(
+            "route-source=autoの経路帯マスクから通路グラフ(交差点・分岐を含む)を"
+            "構築し、粒子ごとに現在のエッジ・進行方向を持たせて交差点で確率的に"
+            "分岐させる複数経路仮説PF(本研究独自)を有効にする。"
+            "--auto-route-centerline(単一経路)とは併用できない。"
+            "既定はJSON設定(無指定ならOFF)。"
+        ),
+    )
+    parser.add_argument(
+        "--no-multi-hypothesis-routing",
+        dest="multi_hypothesis_routing_enabled",
+        action="store_false",
+        help="--multi-hypothesis-routingを明示的に無効化する(JSON設定を上書き)。",
+    )
+    parser.add_argument(
+        "--multi-hypothesis-routing-simplify-px",
+        type=float,
+        default=None,
+        help=(
+            "通路グラフの各エッジを折れ線に簡略化する際の許容誤差(px、RDP法、"
+            "既定10.0)。--auto-route-centerline-simplify-pxのグラフ版。"
+        ),
+    )
+    parser.add_argument(
         "--uncertainty-adaptive-particles",
         dest="uncertainty_adaptive_particles",
         action="store_true",
@@ -1354,6 +1484,7 @@ def apply_map_config(args, config, config_path):
     global ROUTE_SOURCE, AUTO_ROUTE_MAX_HALF_WIDTH_PX, AUTO_ROUTE_DILATION_PX
     global AUTO_ROUTE_EXCLUDE_WIDE_ROOMS, AUTO_ROUTE_EXCLUDE_WIDE_ROOMS_RADIUS_PX
     global AUTO_ROUTE_CENTERLINE_ENABLED, AUTO_ROUTE_CENTERLINE_SIMPLIFY_PX
+    global MULTI_HYPOTHESIS_ROUTING_ENABLED, MULTI_HYPOTHESIS_ROUTING_SIMPLIFY_PX
     global N_PARTICLES_STRAIGHT, N_PARTICLES_TURNING, N_PARTICLES_STOPPED
     global SIGMA_STEP_STRAIGHT, SIGMA_STEP_TURNING, SIGMA_STEP_STOPPED
     global SIGMA_ANGLE_STRAIGHT, SIGMA_ANGLE_TURNING, SIGMA_ANGLE_STOPPED
@@ -1425,6 +1556,26 @@ def apply_map_config(args, config, config_path):
     AUTO_ROUTE_CENTERLINE_SIMPLIFY_PX = (
         args.auto_route_centerline_simplify_px if args.auto_route_centerline_simplify_px is not None
         else float(config.get("auto_route_centerline_simplify_px", 10.0))
+    )
+    # 複数経路仮説PF(粒子単位のグラフ分岐)の既定はJSON設定(無ければOFF)。
+    # AUTO_ROUTE_CENTERLINE_ENABLEDと同様、main()でroute_maskが確定した後に
+    # 通路グラフを構築する。「1本の経路を仮定するか、分岐を扱うか」で両者は
+    # 排他的なため、両方有効な設定はここでエラーにする。
+    configured_multi_hypothesis = bool(config.get("multi_hypothesis_routing_enabled", False))
+    MULTI_HYPOTHESIS_ROUTING_ENABLED = (
+        args.multi_hypothesis_routing_enabled if args.multi_hypothesis_routing_enabled is not None
+        else configured_multi_hypothesis
+    )
+    if MULTI_HYPOTHESIS_ROUTING_ENABLED and AUTO_ROUTE_CENTERLINE_ENABLED:
+        raise ValueError(
+            "multi_hypothesis_routing_enabledとauto_route_centerline_enabledは"
+            "併用できません(どちらも1本/複数本の経路方位補正を担うため)。"
+            "いずれか一方だけを有効にしてください。"
+        )
+    MULTI_HYPOTHESIS_ROUTING_SIMPLIFY_PX = (
+        args.multi_hypothesis_routing_simplify_px
+        if args.multi_hypothesis_routing_simplify_px is not None
+        else float(config.get("multi_hypothesis_routing_simplify_px", 10.0))
     )
     GYRO_UNIT = str(require_config_value(config, "gyro_unit", config_name)).lower()
     if GYRO_UNIT not in {"rad", "deg"}:
@@ -1527,6 +1678,48 @@ def apply_map_config(args, config, config_path):
             if UNCERTAINTY_ADAPTIVE_PARTICLES else "無効"
         )
     )
+
+
+# [本研究独自] check_sensor_quality.py・pick_landmarks.py・verify_route_graph.pyの
+# ような、PF本体を実行せずload_map_config()/apply_map_config()/
+# load_preprocessed_map()等だけを再利用したい読み取り専用の検証・診断スクリプトが
+# 共通で使う、最小構成のargs.Namespace(通称fake_args)を組み立てるヘルパー。
+#
+# 【経緯】以前はこのfake_args構築コードを3つのスクリプトへ個別にコピーしており、
+# apply_map_config()が参照するargs属性が増えるたび(exclude_wide_rooms追加時、
+# 複数経路仮説PF追加時)に3箇所とも同じAttributeErrorで落ちる不具合を2回繰り返した
+# (2026-08-16)。ここに1箇所へまとめることで、今後apply_map_config()の参照属性が
+# 増えてもここだけ直せばよくなる(3スクリプト側は変更不要)。
+#
+# fake_argsの各属性をNoneにする意味は、pdr_pf_improved.py本体のCLI引数と同じ
+# 「未指定ならJSON設定値をそのまま使う」。地図座標系・設定値だけが必要な
+# 読み取り専用スクリプトでは、CLIの全オプションを持つ本物のargparse.Namespaceは
+# 不要なため、apply_map_config()が実際に参照する属性だけを埋めた最小限の
+# Namespaceで代用する。
+def load_map_config_for_tool(map_config_path):
+    """検証・診断用スタンドアロンスクリプトから、地図設定を読み込んで
+    pdr_pf_improved.pyのグローバル設定値(ROUTE_SOURCE等)を反映させる。
+
+    戻り値: (map_config, resolved_args)。
+      map_config: load_map_config()が読み込んだ設定dict。
+      resolved_args: apply_map_config()により.map/.data_dirが実際のパスへ
+        解決済みのargparse.Namespace。load_preprocessed_map(resolved_args.map)や
+        resolved_args.data_dirのように、そのまま後続処理へ渡せる。
+    """
+    fake_args = argparse.Namespace(
+        data_dir=None, map=None, route_constraint_mode=None, route_source=None,
+        auto_route_dilation_px=None, target_distance_px=None, step_gain=None,
+        pf_erosion_radius_px=None,
+        auto_route_exclude_wide_rooms=None, auto_route_exclude_wide_rooms_radius_px=None,
+        auto_route_centerline_enabled=None, auto_route_centerline_simplify_px=None,
+        uncertainty_adaptive_particles=None, uncertainty_neff_low_ratio=None,
+        uncertainty_neff_high_ratio=None, uncertainty_boost_factor=None,
+        uncertainty_shrink_factor=None,
+        multi_hypothesis_routing_enabled=None, multi_hypothesis_routing_simplify_px=None,
+    )
+    map_config, resolved_config_path = load_map_config(map_config_path)
+    apply_map_config(fake_args, map_config, resolved_config_path)
+    return map_config, fake_args
 
 
 def compute_acc_magnitude(df):
@@ -1840,207 +2033,12 @@ def build_route_mask(shape):
     return ndimage.binary_dilation(mask, structure=disk)
 
 
-# [本研究独自] 二値地図から通路領域を自動抽出し、経路帯マスクを作る(route_source=auto)。
-# build_route_mask()が手動route_pointsを太らせるのに対し、こちらは座標を一切与えず
-# 「壁までの距離がmax_half_width_px以下の移動可能領域」を通路候補とみなし、そのうち
-# 最大の連結成分を通路網として採用する(広い部屋は距離が大きく候補から外れるため、
-# 廊下だけが概ね残る)。曲がり角に連動した方位補正(route_guidance_enabled系)は
-# 順序付きroute_pointsが前提のため、autoではまだ対応しない(空間的な経路帯制約のみ)。
-#
-# [本研究独自] ただし上記の「壁までの距離」だけの判定では、大きな部屋の壁際の帯
-# (片側は壁、反対側は広い部屋の内部)を、両側を壁に挟まれた本物の通路と区別できない
-# (2026-08-16、kanri_4fの中心線抽出で発見。詳細はmemo/route_source_auto.md)。
-# exclude_wide_rooms=Trueを指定すると、半径exclude_wide_rooms_radius_pxの円盤でfreeを
-# モルフォロジー開放(収縮→膨張)した結果を通路候補から差し引く。円盤が完全に
-# 収まるくらい広い領域(部屋の内部)は開放でほぼ元の形が復元されるため除外され、
-# 円盤の直径より狭い領域は収縮で消えて開放結果に含まれず、除外されずに残る。
-# 既定はFalse(既存のroute_source=auto比較実験の結果を変えないため)。
-#
-# [本研究独自] 除外半径はmax_half_width_pxとは別のパラメータにしている。kanri_4fで
-# 単体検証したところ、半径=max_half_width_px(20px)では西側廊下・東側廊下を繋ぐ
-# ホール自体も「広い部屋」として除外されてしまい、通路網が西西/東に分断されて
-# 小さい方(西側、実測データの開始位置を含む)が最大連結成分から漏れ、
-# route_constraint_mode=enforceでPFが全滅する事故が起きた(2026-08-16、単体検証で
-# 発見)。半径を30px程度まで上げるとホールは開放されず(生き残り)、大きな部屋
-# (電子工学実験室等)は開放される、というちょうど良い境界が見つかったため、
-# 既定値は「max_half_width_pxそのものではなく、それより広めの別定数」とした。
-def extract_auto_route_mask(
-    binary_for_pf_local, max_half_width_px, dilation_px=0.0,
-    exclude_wide_rooms=False, exclude_wide_rooms_radius_px=None,
-):
-    free = binary_for_pf_local == 255
-    dist = ndimage.distance_transform_edt(free)
-    corridor_candidate = free & (dist <= max_half_width_px)
-    if exclude_wide_rooms:
-        radius_px = (
-            exclude_wide_rooms_radius_px if exclude_wide_rooms_radius_px is not None
-            else max(max_half_width_px * 1.5, max_half_width_px + 10.0)
-        )
-        radius = max(1, int(round(radius_px)))
-        yy, xx = np.ogrid[-radius:radius + 1, -radius:radius + 1]
-        disk = xx * xx + yy * yy <= radius * radius
-        wide_rooms = ndimage.binary_opening(free, structure=disk)
-        excluded = corridor_candidate & wide_rooms
-        corridor_candidate = corridor_candidate & ~wide_rooms
-        logging.info(
-            f"route_source=auto 広い部屋の壁際を除外: {int(excluded.sum())}px "
-            f"(開放半径={radius_px:.1f}px)"
-        )
-    labeled, n = ndimage.label(corridor_candidate, structure=np.ones((3, 3)))
-    if n == 0:
-        logging.warning("route_source=autoで通路領域が抽出できませんでした。全域を通路として扱います。")
-        return np.ones(free.shape, dtype=bool)
-    sizes = ndimage.sum(corridor_candidate, labeled, range(1, n + 1))
-    largest_label = int(np.argmax(sizes)) + 1
-    mask = labeled == largest_label
-    # [本研究独自] 抽出した通路領域は実際の建物形状に忠実な幅を持つため、狭い区間では
-    # 手動route_pointsの一様バッファ(半径18px)より制約が厳しくなりPFが不安定化する
-    # ことが確認された(CLAUDE_MEMO.md参照)。dilation_px>0を指定すると、抽出した形状は
-    # 保ったまま境界へ数px分の余裕(膨張)を追加できる。地図の実形状からの乖離を最小限に
-    # 抑えつつ、粒子ノイズへの緩衝を持たせるための後処理。
-    if dilation_px > 0:
-        radius = max(1, int(round(dilation_px)))
-        yy, xx = np.ogrid[-radius:radius + 1, -radius:radius + 1]
-        disk = xx * xx + yy * yy <= radius * radius
-        mask = ndimage.binary_dilation(mask, structure=disk)
-        mask &= free
-    return mask
-
-
-# [本研究独自] extract_auto_route_mask()が作る領域マスクを細線化(skeletonize)して
-# 1本の順序付き中心線を抽出し、既存の曲がり角連動方位補正(route_guidance_enabled系、
-# もともとroute_points前提)をroute_source=autoでも動かせるようにする。マスクの空間
-# 制約自体(PFの重み付け)はextract_auto_route_mask()のまま変更せず、この関数の結果は
-# ROUTE_POINTS(方位補正・曲がり角判定用)にのみ使う。
-# 現在の実測データ(0805系)の通路は分岐のない単純な形状であることを確認済み
-# (memo/route_source_auto.md)なので、骨格化後にできる小さな分岐・突起はノイズと
-# みなし、木の直径(最も長い経路)を1本だけ採用する簡易版とした。分岐を含む通路網
-# (§6.2の完全版)への対応は今後の課題。
-def extract_ordered_centerline(mask, simplify_tolerance_px):
-    """経路帯マスクから順序付き中心線をROUTE_POINTS形式((x, y)タプルのリスト)で返す。
-    抽出できない場合は空リストを返す(呼び出し側はROUTE_POINTS=[]のまま、つまり
-    方位補正が無効な従来挙動にフォールバックする)。
-    """
-    skeleton = skeletonize(mask)
-    ys, xs = np.nonzero(skeleton)
-    if len(ys) < 2:
-        return []
-
-    pixel_set = set(zip(ys.tolist(), xs.tolist()))
-    neighbor_offsets = [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 1), (1, -1), (1, 0), (1, 1)]
-
-    def neighbors(p):
-        y, x = p
-        return [q for dy, dx in neighbor_offsets if (q := (y + dy, x + dx)) in pixel_set]
-
-    def bfs_farthest(start):
-        """startから幅優先探索し、最も遠い(最終的に訪問した)画素と、経路復元用の
-        親ポインタ辞書を返す。木でない(小さな輪)場合も、幅優先で得られる木構造上で
-        近似的に最遠点を求めるヒューリスティックとして扱う。"""
-        visited = {start: None}
-        queue = collections.deque([start])
-        farthest = start
-        while queue:
-            current = queue.popleft()
-            farthest = current
-            for nxt in neighbors(current):
-                if nxt not in visited:
-                    visited[nxt] = current
-                    queue.append(nxt)
-        return farthest, visited
-
-    # 木の直径を求める定番の2回BFS(始点は骨格の任意の画素でよい)。
-    any_pixel = next(iter(pixel_set))
-    one_end, _ = bfs_farthest(any_pixel)
-    other_end, visited = bfs_farthest(one_end)
-
-    if len(visited) < len(pixel_set) * 0.9:
-        logging.warning(
-            "route_source=auto中心線抽出: 骨格が複数の連結成分に分かれている可能性があります"
-            f"(到達画素={len(visited)}/{len(pixel_set)})。最も長い経路のみを採用します。"
-        )
-
-    path = []
-    node = other_end
-    while node is not None:
-        path.append(node)
-        node = visited[node]
-    path.reverse()  # one_end -> other_end の順
-
-    points_xy = [(float(x), float(y)) for y, x in path]
-
-    # [本研究独自] マスクが「輪」状に連結して見える場合への安全装置。
-    # extract_auto_route_mask()の最大連結成分には、kanri_4f.jpgのように、2値化した
-    # 地図上では2本の帯が両端付近で連結して見える場合がある(2026-08-16、単体検証で
-    # 発見)。実際の建物平面図・壁検出結果(kanri_4f_preview_final3.png)と1px単位で
-    # 照合したところ、原因は2つの組み合わせだった: (1)高さの異なる西側廊下・東側廊下
-    # を繋ぐホール・階段(3Fへの階段)は実在する正しい接続、(2)もう一方は
-    # extract_auto_route_mask()が壁までの距離のみで通路候補を判定するため、大きな
-    # 部屋(電子工学実験室等)の壁際の帯を通路と区別できず、たまたま別の階段(屋外階段)
-    # の踊り場まで繋がって見えるだけの見せかけの経路だった。文字(部屋番号等)を壁と
-    # 誤認したことが原因ではない(壁検出結果を平面図と照合して正確だったことを確認
-    # 済み)。詳細はmemo/route_source_auto.md参照。理由の組み合わせによらず、
-    # このように連結して見える場合は木の直径探索が誤って輪をぐるっと回る経路を
-    # 「最も長い経路」として選んでしまうため、実際の経路長が始点・終点間の直線距離に
-    # 対して極端に長い(=大きく迂回している)場合はこの誤検出とみなし、抽出を諦めて
-    # 空リストを返す(呼び出し側は従来通りROUTE_POINTS=[]のまま、方位補正なしに
-    # フォールバックする)。通路と部屋の壁際を区別できるマスク生成方式への改良や、
-    # 分岐を含む通路網への正式対応(§6.2の通路グラフ)は今後の課題。
-    path_xy = np.asarray(points_xy, dtype=float)
-    path_length = float(np.sum(np.hypot(*np.diff(path_xy, axis=0).T)))
-    straight_dist = float(np.hypot(*(path_xy[-1] - path_xy[0])))
-    detour_ratio = path_length / straight_dist if straight_dist > 1e-6 else float("inf")
-    if detour_ratio > AUTO_ROUTE_CENTERLINE_MAX_DETOUR_RATIO:
-        logging.warning(
-            "route_source=auto中心線抽出: 始点・終点間の迂回率が"
-            f"{detour_ratio:.1f}倍(経路長={path_length:.0f}px, 直線距離={straight_dist:.0f}px)と"
-            f"閾値({AUTO_ROUTE_CENTERLINE_MAX_DETOUR_RATIO:.1f}倍)を超えており、"
-            "通路網がループ(輪)状になっている可能性があります。誤った経路を採用しない"
-            "ため中心線抽出を見送ります。"
-        )
-        return []
-
-    return _rdp_simplify(points_xy, simplify_tolerance_px)
-
-
-def _rdp_simplify(points, epsilon):
-    """Ramer-Douglas-Peucker法による折れ線の簡略化。細線化直後のジグザグな画素列
-    (points、(x, y)のリスト)から、epsilon(px)より線分から離れた点だけを残すことで、
-    ROUTE_POINTSとして使える少数の直線区間(曲がり角)へ変換する。再帰ではなく
-    明示的なスタックで実装し、画素数が多い経路でも再帰上限に触れないようにする。
-    """
-    if len(points) < 3 or epsilon <= 0:
-        return points
-
-    pts = np.asarray(points, dtype=float)
-    keep = np.zeros(len(points), dtype=bool)
-    keep[0] = True
-    keep[-1] = True
-    stack = [(0, len(points) - 1)]
-
-    while stack:
-        start_i, end_i = stack.pop()
-        if end_i - start_i < 2:
-            continue
-        start, end = pts[start_i], pts[end_i]
-        dx, dy = end[0] - start[0], end[1] - start[1]
-        seg_len = float(np.hypot(dx, dy))
-        inner_x = pts[start_i + 1:end_i, 0]
-        inner_y = pts[start_i + 1:end_i, 1]
-        if seg_len < 1e-9:
-            dists = np.hypot(inner_x - start[0], inner_y - start[1])
-        else:
-            cross = np.abs(dy * (inner_x - start[0]) - dx * (inner_y - start[1]))
-            dists = cross / seg_len
-        max_local = int(np.argmax(dists))
-        max_dist = float(dists[max_local])
-        split_i = start_i + 1 + max_local
-        if max_dist > epsilon:
-            keep[split_i] = True
-            stack.append((start_i, split_i))
-            stack.append((split_i, end_i))
-
-    return [tuple(p) for p, k in zip(points, keep) if k]
+# [本研究独自] 経路帯マスク抽出・通路グラフ化(骨格化・ノード整理・トポロジー化)
+# 関連の関数は、ファイル肥大化(3500行超)を受けてpdr_route_graph.pyへ切り出した
+# (2026-08-16)。extract_auto_route_mask/extract_ordered_centerline/
+# build_skeleton_graph/simplify_skeleton_graph/build_route_graph_topology/
+# nearest_edge_positionは、いずれも冒頭のimportで再importしているため、
+# このファイル内では従来通りそのまま(プレフィックス無しで)呼び出せる。
 
 
 # グローバルな描画・監視状態
@@ -2163,6 +2161,7 @@ def redraw_all_paths():
             estimated_positions = cached_result['estimated_positions']
             behavior_history = cached_result.get('behavior_history', [])
             particle_count_history = cached_result.get('particle_count_history', [])
+            step_timestamps = cached_result.get('step_timestamps', [])
             route_segment_index = cached_result.get('route_segment_index', 0)
             turn_pending = cached_result.get('turn_pending', False)
             file_start_x, file_start_y = cached_result.get(
@@ -2233,7 +2232,8 @@ def redraw_all_paths():
                 route_mask=route_mask,
                 binary_for_pf=binary_for_pf,
                 dist_map=dist_map,
-                params=pf_params
+                params=pf_params,
+                route_topology=route_topology,
             )
 
             gyro_angle          = 0.0
@@ -2246,6 +2246,7 @@ def redraw_all_paths():
             current_behavior    = MoveBehavior.STRAIGHT
             behavior_history    = []
             particle_count_history = []
+            step_timestamps     = []  # [本研究独自] estimated_positionsと1:1対応するtimestamp
             # 曲がり検出はturn_pendingとして保持し、設定曲がり角へ
             # 到達した時だけ次の線分へ進む。
             route_segment_index = nearest_route_segment_index(
@@ -2254,6 +2255,10 @@ def redraw_all_paths():
             )
             turn_pending = False
             initial_map_heading = np.deg2rad(args.initial_heading_deg)
+            if route_topology is not None:
+                # [本研究独自] 複数経路仮説PF: 開始位置に最も近いエッジ・区間へ
+                # 全粒子を割り当てる(進行方向はinitial_map_headingとの整合で決める)。
+                pf.initialize_route_state(file_start_x, file_start_y, initial_map_heading)
             try:
                 # --heading-source androidをyaw_deg列の無い旧CSVへ適用した場合など、
                 # この1ファイルだけの設定不備でバッチ全体が中断しないようにする。
@@ -2460,6 +2465,7 @@ def redraw_all_paths():
                 pf.update(step_px, step_heading, current_behavior)
                 behavior_history.append(current_behavior.value)
                 particle_count_history.append(len(pf.particles))
+                step_timestamps.append(float(row['timestamp']))
 
             estimated_positions = pf.estimated_positions
             extinction_count = pf.extinction_count
@@ -2471,6 +2477,7 @@ def redraw_all_paths():
                 'extinction_count': extinction_count,
                 'behavior_history': behavior_history,
                 'particle_count_history': particle_count_history,
+                'step_timestamps': step_timestamps,
                 'route_segment_index': route_segment_index,
                 'turn_pending': turn_pending,
                 'start_position': (file_start_x, file_start_y),
@@ -2529,6 +2536,26 @@ def redraw_all_paths():
                 linewidths=0.7,
             )
 
+            # [本研究独自] --save-trajectory-csv指定時のみ、正解位置データとの
+            # 突き合わせ用にCSVごとの推定軌跡を保存する(既定では保存しない)。
+            if args.save_trajectory_csv:
+                if len(step_timestamps) != len(estimated_positions):
+                    logging.warning(
+                        "  推定軌跡CSVを保存できません: step_timestamps(%d件)と"
+                        "estimated_positions(%d件)の件数が一致しません。",
+                        len(step_timestamps),
+                        len(estimated_positions),
+                    )
+                else:
+                    traj_path = (RESULTS_DIR / f"{Path(file_name).stem}_trajectory.csv").resolve()
+                    traj_path.parent.mkdir(parents=True, exist_ok=True)
+                    pd.DataFrame({
+                        "timestamp": step_timestamps,
+                        "x_px": pos_arr[:, 0],
+                        "y_px": pos_arr[:, 1],
+                    }).to_csv(traj_path, index=False)
+                    logging.info(f"  推定軌跡CSVを保存しました: {traj_path}")
+
     end_overall = time.time()
     logging.info("\n適応型パーティクルフィルタを使用")
     logging.info(f"Overall time: {end_overall - start_overall:.2f} seconds")
@@ -2568,7 +2595,7 @@ def redraw_all_paths():
 
 def main():
     global args, data_dir, img_path, binary, binary_for_pf, dist_map, h, w, route_mask, fig, ax
-    global ROUTE_POINTS
+    global ROUTE_POINTS, route_topology
 
     args = parse_args()
     numeric_level = getattr(logging, args.log_level.upper(), None)
@@ -2587,6 +2614,7 @@ def main():
     h, w = binary.shape
     if not data_dir.exists():
         raise FileNotFoundError(f"CSVフォルダが見つかりません: {data_dir}")
+    route_topology = None  # [本研究独自] 複数経路仮説PF。route_source=auto以外・未有効時はNoneのまま。
     if ROUTE_SOURCE == "auto":
         route_mask = extract_auto_route_mask(
             binary_for_pf, AUTO_ROUTE_MAX_HALF_WIDTH_PX, AUTO_ROUTE_DILATION_PX,
@@ -2613,6 +2641,27 @@ def main():
                     "route_source=autoで通路中心線を抽出できませんでした。"
                     "方位補正は無効のままです(従来通り空間マスクのみ)。"
                 )
+        if MULTI_HYPOTHESIS_ROUTING_ENABLED:
+            skeleton_graph = build_skeleton_graph(route_mask)
+            simplified_graph = simplify_skeleton_graph(skeleton_graph)
+            route_topology = build_route_graph_topology(
+                simplified_graph, MULTI_HYPOTHESIS_ROUTING_SIMPLIFY_PX
+            )
+            if route_topology["edges"]:
+                n_junction = sum(1 for n in simplified_graph["nodes"] if n["kind"] == "junction")
+                n_endpoint = sum(1 for n in simplified_graph["nodes"] if n["kind"] == "endpoint")
+                logging.info(
+                    f"複数経路仮説PF用の通路グラフ: 交差点={n_junction}, 端点={n_endpoint}, "
+                    f"エッジ={len(route_topology['edges'])} "
+                    f"(簡略化閾値={MULTI_HYPOTHESIS_ROUTING_SIMPLIFY_PX:.1f}px) "
+                    f"→ 粒子ごとのグラフ分岐PFが有効になります"
+                )
+            else:
+                logging.warning(
+                    "複数経路仮説PF: 通路グラフのエッジが0本のため無効化します"
+                    "(従来通り空間マスクのみで実行します)。"
+                )
+                route_topology = None
     else:
         route_mask = build_route_mask(binary.shape)
 
