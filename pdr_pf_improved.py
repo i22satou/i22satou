@@ -2,6 +2,11 @@
 # pdr_pf_improved.py
 #
 # 【変更履歴】
+# - 2026-08-16: 不確実性適応粒子数の4パラメータ(neff_low_ratio/neff_high_ratio/
+#               boost_factor/shrink_factor)をCLIから個別に上書きできる引数
+#               (--uncertainty-neff-low-ratio等)を追加。挙動自体は変更せず、
+#               感度分析(sensitivity_uncertainty_particles.py)がJSON設定ファイルを
+#               増やさずにパラメータを振れるようにするための追加のみ。
 # - 2026-08-15: [本研究独自] 不確実性適応粒子数(進捗反映版メモ.txt §6.5相当)を追加。
 #               直前ステップの実効サンプルサイズ(Neff)を粒子数に対する比率(neff_ratio)
 #               で見て、移動様態ベースの粒子数(先行研究の枠組み)をさらに増減させる
@@ -1146,6 +1151,24 @@ def parse_args():
         help="--uncertainty-adaptive-particlesを明示的に無効化する(JSON設定を上書き)。",
     )
     parser.add_argument(
+        "--uncertainty-neff-low-ratio", type=float, default=None,
+        help="不確実性適応粒子数の下側閾値(neff_ratio未満で粒子を増やす、既定0.30)。"
+             "感度分析用にJSON設定を上書きする。",
+    )
+    parser.add_argument(
+        "--uncertainty-neff-high-ratio", type=float, default=None,
+        help="不確実性適応粒子数の上側閾値(neff_ratio超で粒子を減らす、既定0.60)。"
+             "感度分析用にJSON設定を上書きする。",
+    )
+    parser.add_argument(
+        "--uncertainty-boost-factor", type=float, default=None,
+        help="下側閾値未満のときの粒子数倍率(既定1.5)。感度分析用にJSON設定を上書きする。",
+    )
+    parser.add_argument(
+        "--uncertainty-shrink-factor", type=float, default=None,
+        help="上側閾値超のときの粒子数倍率(既定0.75)。感度分析用にJSON設定を上書きする。",
+    )
+    parser.add_argument(
         "--heading-source",
         choices=["gyro", "android"],
         default="gyro",
@@ -1295,10 +1318,22 @@ def apply_map_config(args, config, config_path):
         if args.uncertainty_adaptive_particles is not None
         else configured_uncertainty
     )
-    UNCERTAINTY_NEFF_LOW_RATIO = float(adaptive.get("uncertainty_neff_low_ratio", 0.30))
-    UNCERTAINTY_NEFF_HIGH_RATIO = float(adaptive.get("uncertainty_neff_high_ratio", 0.60))
-    UNCERTAINTY_BOOST_FACTOR = float(adaptive.get("uncertainty_boost_factor", 1.5))
-    UNCERTAINTY_SHRINK_FACTOR = float(adaptive.get("uncertainty_shrink_factor", 0.75))
+    UNCERTAINTY_NEFF_LOW_RATIO = (
+        args.uncertainty_neff_low_ratio if args.uncertainty_neff_low_ratio is not None
+        else float(adaptive.get("uncertainty_neff_low_ratio", 0.30))
+    )
+    UNCERTAINTY_NEFF_HIGH_RATIO = (
+        args.uncertainty_neff_high_ratio if args.uncertainty_neff_high_ratio is not None
+        else float(adaptive.get("uncertainty_neff_high_ratio", 0.60))
+    )
+    UNCERTAINTY_BOOST_FACTOR = (
+        args.uncertainty_boost_factor if args.uncertainty_boost_factor is not None
+        else float(adaptive.get("uncertainty_boost_factor", 1.5))
+    )
+    UNCERTAINTY_SHRINK_FACTOR = (
+        args.uncertainty_shrink_factor if args.uncertainty_shrink_factor is not None
+        else float(adaptive.get("uncertainty_shrink_factor", 0.75))
+    )
     UNCERTAINTY_PARTICLES_MIN = int(adaptive.get("uncertainty_particles_min", 80))
     UNCERTAINTY_PARTICLES_MAX = int(adaptive.get("uncertainty_particles_max", 1200))
 

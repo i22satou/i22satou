@@ -6,6 +6,21 @@
 
 ---
 
+### 2026-08-16: 感度分析(90回分)のPNG106枚を削除候補へ移動
+
+[uncertainty_particles.md](uncertainty_particles.md)のOFAT感度分析で生成された
+`results/20260816_*.png`(90回の本番実行+15回のスモークテスト+1回の動作確認、
+計106枚)を`削除候補/results/`へ移動。各PNGのファイル名は
+`route-enforce-auto+unc_seed-{seed}.png`で、どのパラメータ組(baseline/
+neff_low_ratio=0.15等)の結果かはファイル名からは区別できず、タイムスタンプでしか
+判別できない(pdr_pf_improved.pyのPNG命名がroute_source/route_constraint_mode/
+seedのみに基づき、感度分析用の追加CLI引数を反映しないため)。感度分析の結論は
+生データCSV(`results/20260816_110418_uncertainty_sensitivity.csv`)と
+[uncertainty_particles.md](uncertainty_particles.md)の集計表に残っており、
+個々のPNGに一意の価値はないため全て移動対象とした。代表画像が必要な場合は
+2026-08-15時点の`results/20260815_230748_route-enforce-auto+unc_seed-42.png`
+(auto-enforce-unc条件、seed=42)が既存の参照可能な1枚として`results/`に残っている。
+
 ### 結論・現状
 
 - ルート直下17個(test3〜test6.py, test8〜test11_gemini.py, 孤立プロトタイプ2本,

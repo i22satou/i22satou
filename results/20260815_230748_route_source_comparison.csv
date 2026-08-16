@@ -1,3 +1,4 @@
+# compare_route_source.py の出力。map_configs/l_map.json(L字合成地図)の技術確認用、pdr_log_0410_1535/0414_0902/0414_0940/0624_14.csv対象(kanri_4f.jsonのexclude_csv)、seed=42のみ×4条件。L字マップは部屋がなく空間制約の効果を測定できないため第二検証環境として不採用(memo/route_source_auto.md参照)。
 seed,condition,file,steps,extinctions,valid_ratio,route_ratio,neff_mean,pos_spread_mean,final_x,final_y,endpoint_error_x
 42,none,pdr_log_0410_1535.csv,25,6,0.151,1.0,40.7,69.6,388.5,617.0,
 42,none,pdr_log_0414_0902.csv,21,6,0.117,1.0,38.2,122.7,389.5,618.2,
