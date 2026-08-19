@@ -5,6 +5,8 @@ CLAUDE.md / pdr_pf_improved.py / CLAUDE_MEMO.txt の記述に基づき、
 先行研究引用部分と本研究独自部分を色分けし、目標方式(方式E)に対する
 未実装要素を明示する。
 """
+import os
+
 import matplotlib
 import japanize_matplotlib  # noqa: F401  (日本語フォント登録)
 import matplotlib.pyplot as plt
@@ -12,7 +14,10 @@ from matplotlib.patches import FancyBboxPatch, Polygon, Rectangle
 
 matplotlib.rcParams['hatch.linewidth'] = 0.6
 
-OUT_DIR = "/private/tmp/claude-501/-Users-soma-Library-CloudStorage-OneDrive----------------------/535b0825-ea7a-4b41-baba-d5ba302ec9bf/scratchpad"
+# このスクリプト自身のあるディレクトリ(figures/)へ直接出力する。
+# 以前は他セッションの一時フォルダへの絶対パス固定で、実行のたびに
+# 手動コピーが必要だったため、常に有効なパスに修正。
+OUT_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # ---------------------------------------------------------------------------
 STYLES = {
@@ -227,7 +232,7 @@ for i, (t1, t2, sty) in enumerate(bullets):
     s = STYLES[sty]
     ax.text(82, yy - 1.5, t2, fontsize=4.15, ha='left', va='center', color=s['ec'], style='italic')
 
-arrow(ax, [B(b_fusion), (45, 108), (60, 108), (74, 106.5)])
+arrow(ax, [B(b_fusion), (45, 108), (60, 108), (60, 106.5), (74, 106.5)])
 arrow(ax, [R(b_prev), (74, 103)])
 arrow(ax, [R(b_beh2), (74, 93)])
 
@@ -236,7 +241,7 @@ b_gap3 = rect(ax, 238, 112.5, 100, 8.5,
               "【未実装】通路グラフ化(分岐/曲がり点のノード化)・複数経路仮説(交差点分岐選択)\n"
               "・地図領域の明示分類(壁/廊下/部屋/ドア) → いずれも目標方式Eに必要",
               'gap', 4.35)
-arrow(ax, [(184, 85), (191, 85), (191, 112.5), L(b_gap3)], color='#b71c1c', ls='--')
+arrow(ax, [(184, 85), (184, 112.5), L(b_gap3)], color='#b71c1c', ls='--')
 
 # --- 判定〜出力ミニフロー(右カラム) ---
 d1 = diamond(ax, 240, 101, 17, 9, "重み合計\n>0?", 'prior', 4.6)
@@ -283,20 +288,29 @@ labels = [
     ("C", "移動様態適応PF", "(地図トポロジー未使用)", "実装・比較実験済み", 'prior', 4.05),
     ("D", "手動経路優先PF", "(route_points 人手指定)", "実装・比較実験済み", 'orig', 4.05),
     ("E", "提案方式(目標)", "自動経路+不確実性適応+複数経路仮説",
-     "部分実装:自動経路抽出・不確実性適応(既定OFF)は実装/複数経路仮説・通路グラフ化は未実装", 'orig_off', 3.5),
+     "部分実装:自動経路抽出・不確実性適応(既定OFF)は実装\n/複数経路仮説・通路グラフ化は未実装", 'orig_off', 3.35),
 ]
-xw = 51
-x0 = 21
-centers = []
-for i, (tag, name, desc, status, sty, fs) in enumerate(labels):
-    cx = x0 + i * (xw + 4)
-    centers.append(cx)
-    txt = f"方式{tag}: {name}\n{desc}\n[{status}]"
-    rect(ax, cx, 53.2, xw, 8.6, txt, sty, fs)
-    if i < len(labels) - 1:
-        arrow(ax, [(cx + xw / 2, 53.2), (cx + xw / 2 + 4, 53.2)])
+# 方式Eは説明文が長いため箱幅を広げる。パネル(x:6〜291)に対し
+# 左右マージンを9mmずつ均等に取り、A〜Dは47mm・Eは63mm幅で並べる
+# (以前はx0=21,xw=51の計算でAの左端がパネル外(-4.5mm)へはみ出していた)。
+widths = [47, 47, 47, 47, 63]
+gap = 4
+left0 = 15
+lefts = []
+lx = left0
+for w in widths:
+    lefts.append(lx)
+    lx += w + gap
+centers = [lx0 + w / 2 for lx0, w in zip(lefts, widths)]
 
-ax.annotate("現在の実装位置(方式Dは完了・方式Eは部分実装)", xy=((centers[3] + centers[4]) / 2, 57.7),
+for i, ((tag, name, desc, status, sty, fs), lx0, w, cx) in enumerate(zip(labels, lefts, widths, centers)):
+    txt = f"方式{tag}: {name}\n{desc}\n[{status}]"
+    rect(ax, cx, 53.2, w, 8.6, txt, sty, fs)
+    if i < len(labels) - 1:
+        arrow(ax, [(cx + w / 2, 53.2), (cx + w / 2 + gap, 53.2)])
+
+gap_mid = (lefts[3] + widths[3] + lefts[4]) / 2  # 方式D右端と方式E左端の中間
+ax.annotate("現在の実装位置(方式Dは完了・方式Eは部分実装)", xy=(gap_mid, 58.1),
              xytext=(centers[4] + 8, 64.5), fontsize=4.7, ha='center', color='#b5460a',
              fontweight='bold',
              arrowprops=dict(arrowstyle='-|>', color='#b5460a', lw=1.1))
