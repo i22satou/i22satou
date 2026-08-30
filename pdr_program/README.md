@@ -17,7 +17,9 @@ PDR(歩行者自律測位)+移動様態適応型パーティクルフィルタ�
   ファイル肥大化対策)。経路帯マスク抽出・通路グラフ化(骨格化・ノード整理・
   トポロジー変換)関連の関数(`extract_auto_route_mask`, `extract_ordered_centerline`,
   `build_skeleton_graph`, `simplify_skeleton_graph`, `build_route_graph_topology`,
-  `nearest_edge_position`等)がここにある。`pdr_pf_improved.py`冒頭で
+  `nearest_edge_position`等)に加え、交差点分岐選択の方位重み付け計算
+  (`edge_entry_heading`, `choose_branch_by_heading`。2026-08-30追加)がここにある。
+  `pdr_pf_improved.py`冒頭で
   `from pdr_route_graph import (...)`により再importしているため、呼び出し側からは
   分割を意識せず`pdrmod.build_skeleton_graph(...)`のように呼べる。
 - **`CHANGELOG.md`** — `pdr_pf_improved.py`の変更履歴(旧: ファイル冒頭コメントに

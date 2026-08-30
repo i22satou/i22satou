@@ -2,6 +2,12 @@
 # pdr_route_graph.py
 #
 # 【変更履歴】
+# - 2026-08-30: [本研究独自] 複数経路仮説PFの分岐選択を、完全一様乱択から
+#               直前の実測方位に近いエッジを優先するガウス重み付き乱択へ
+#               変更(edge_entry_heading/choose_branch_by_heading追加)。
+#               pdr_pf_improved.py側のコード増大を避けるため、方位計算を
+#               伴う純粋関数はこちらに置いた(呼び出し側の_advance_route_state
+#               は関数呼び出し1つに置き換わるだけで数行増に留まる)。
 # - 2026-08-16: [本研究独自] 新規作成。pdr_pf_improved.pyが3500行を超えて
 #               肥大化してきたため、経路帯マスク抽出・通路グラフ化(骨格化・
 #               ノード整理・トポロジー変換)関連の関数をこのファイルへ切り出した。
@@ -771,3 +777,45 @@ def nearest_edge_position(topology, x, y):
         return None, None, None
     _, edge_id, seg_index, t = best
     return edge_id, seg_index, t
+
+
+def edge_entry_heading(edge, direction):
+    """エッジedgeに指定方向(+1=from->to, -1=to->from)で進入した場合の、
+    最初の区間の進行方位(rad)を返す。分岐候補の方位重み付け
+    (choose_branch_by_heading)に使う小さな純粋関数として切り出した。
+    """
+    seg_headings = edge["seg_headings"]
+    if direction > 0:
+        return float(seg_headings[0])
+    reversed_heading = seg_headings[-1] + np.pi
+    return float(np.arctan2(np.sin(reversed_heading), np.cos(reversed_heading)))
+
+
+def choose_branch_by_heading(candidates, edges_by_id, reference_heading, sigma_rad):
+    """[本研究独自] 複数経路仮説PFの交差点分岐選択(2026-08-30、Week3+改善)。
+
+    候補(edge_id, direction)のうち、reference_heading(直前の実測方位)に
+    近い方位で進入するエッジほど選ばれやすいガウス重み付き乱択で1つ選ぶ。
+    従来のnp.random.randintによる完全一様乱択(2026-08-16実装)を置き換える。
+    全候補の方位差が同程度ならほぼ一様乱択に近づくため、直進が明確な分岐では
+    正しい枝を優先しつつ、判断がつかない場合は従来通り確率的に探索する。
+
+    candidates: [(edge_id, direction), ...] (逆走候補は呼び出し側で除外済みの
+    前提。1件のみならそのまま返す)
+    sigma_rad: 重みの広がり(rad)。小さいほど方位が近い候補に強く偏る。
+    """
+    if len(candidates) == 1:
+        return candidates[0]
+    headings = np.array([
+        edge_entry_heading(edges_by_id[edge_id], direction)
+        for edge_id, direction in candidates
+    ])
+    diffs = np.arctan2(np.sin(headings - reference_heading), np.cos(headings - reference_heading))
+    weights = np.exp(-(diffs ** 2) / (2.0 * sigma_rad ** 2))
+    total = float(weights.sum())
+    if not np.isfinite(total) or total <= 0.0:
+        weights = np.ones(len(candidates))
+        total = float(weights.sum())
+    probs = weights / total
+    choice_idx = np.random.choice(len(candidates), p=probs)
+    return candidates[choice_idx]

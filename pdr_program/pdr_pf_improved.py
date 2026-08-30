@@ -4,11 +4,12 @@
 # 【変更履歴】
 # 全履歴はCHANGELOG.md参照(2026-08-16にここから切り出した)。変更したら
 # CHANGELOG.mdの先頭に日付付きで1項目追加すること。直近の変更のみ下記に残す:
-# - 2026-08-16: [本研究独自] コード肥大化対策(3500行超)の一環として、
-#               経路帯マスク・通路グラフ関連の関数をpdr_route_graph.pyへ切り出し、
-#               検証スクリプト3本のfake_args重複をload_map_config_for_tool()へ
-#               一本化し、この変更履歴自体もCHANGELOG.mdへ切り出した
-#               (3506行→約2700行)。関数の中身・挙動は変更していない。
+# - 2026-08-30: [本研究独自] 複数経路仮説PFの交差点分岐選択に、直前の実測方位で
+#               重み付けする方式(choose_branch_by_heading、pdr_route_graph.py、
+#               --multi-hypothesis-branch-heading-sigma-degで調整)を追加。ただし
+#               正解経路との照合の結果、一様乱択を明確に上回る効果は確認できな
+#               かったため、既定値を一様乱択相当(σ=100000)に戻した。関数自体は
+#               今後の再検討用に残している(詳細はCHANGELOG.md 2026-08-30(3)(4)項)。
 # - 2026-08-16: [本研究独自] 複数経路仮説PF(粒子単位のグラフ分岐PF方式)の
 #               第一段階として、build_route_graph_topology()・
 #               nearest_edge_position()・ParticleFilterPDRへの接続を実装。
@@ -304,6 +305,7 @@ from pdr_route_graph import (
     simplify_skeleton_graph,
     build_route_graph_topology,
     nearest_edge_position,
+    choose_branch_by_heading,
 )
 
 try:
@@ -378,6 +380,12 @@ AUTO_ROUTE_CENTERLINE_MAX_DETOUR_RATIO = 2.5
 # エラーにする)。
 MULTI_HYPOTHESIS_ROUTING_ENABLED = False
 MULTI_HYPOTHESIS_ROUTING_SIMPLIFY_PX = 10.0
+# 交差点分岐選択(choose_branch_by_heading、pdr_route_graph.py)の重み広がり(度)。
+# 小さいほど直前の実測方位に近いエッジへ強く偏り、大きいほど一様乱択に近づく。
+# 既定は100000(事実上の一様乱択)。2026-08-30、route_constraint_mode=enforceでの
+# 正しい検証により、方位重み付け(σ=10〜60)が一様乱択を明確に上回らないと判明した
+# ため、既定を一様乱択相当に戻した(詳細はCHANGELOG.md 2026-08-30(4)項)。
+MULTI_HYPOTHESIS_BRANCH_HEADING_SIGMA_DEG = 100000.0
 GYRO_UNIT = "rad"
 # 別の図(L字経路用など)で使用しており、このJSONの実行対象からは除外したいCSVファイル名。
 # map_configs/*.jsonの"exclude_csv"(任意設定)から読み込む。ファイル名の完全一致で判定する。
@@ -961,11 +969,13 @@ class ParticleFilterPDR:
         cos_sum = np.cos(sensor_step_heading) + np.cos(route_headings) * ROUTE_HEADING_WEIGHT
         return np.arctan2(sin_sum, cos_sum)
 
-    def _advance_route_state(self):
+    def _advance_route_state(self, reference_heading):
         """各粒子の現在位置がエッジ区間の終点(次の曲がり角、またはノード)に
         ROUTE_CORNER_THRESHOLD_PX以内まで近づいたら、区間を1つ進める。エッジの
         終端(ノード)に達した粒子は、そのノードに接続する他のエッジの中から
-        次の進行先をランダムに選ぶ(交差点での分岐=複数経路仮説の枝分かれ)。
+        次の進行先を選ぶ(交差点での分岐=複数経路仮説の枝分かれ)。選択は
+        reference_heading(直前の実測方位)に近いエッジを優先するガウス重み付き
+        乱択(choose_branch_by_heading、pdr_route_graph.py、2026-08-30)。
         来た道をそのまま戻る選択肢は、他に行き先がある限り除外する(行き止まり
         =端点ノードでは選択肢が無いので、そのまま引き返す)。
         分岐後にどの仮説が正しいかは、この後の通常の重み付け・リサンプリング
@@ -1018,7 +1028,10 @@ class ParticleFilterPDR:
                 backtrack = (edge_id, -1 if d > 0 else 1)
                 non_backtrack = [c for c in candidates if c != backtrack]
                 choices = non_backtrack if non_backtrack else candidates
-                new_edge_id, new_direction = choices[np.random.randint(len(choices))]
+                new_edge_id, new_direction = choose_branch_by_heading(
+                    choices, edges_by_id, reference_heading,
+                    np.radians(MULTI_HYPOTHESIS_BRANCH_HEADING_SIGMA_DEG),
+                )
                 new_edge_ids[gi] = new_edge_id
                 new_seg_indices[gi] = 0
                 new_directions[gi] = float(new_direction)
@@ -1080,7 +1093,7 @@ class ParticleFilterPDR:
         # スカラーのまま使う(既存の単一経路モード・経路制約なしモードは無変更)。
         corrected_step_heading = step_heading
         if self.route_topology is not None:
-            self._advance_route_state()
+            self._advance_route_state(step_heading)
             corrected_step_heading = self._route_corrected_headings(step_heading)
 
         # 1. 状態遷移（移動様態ごとのノイズ付与）
@@ -1380,6 +1393,16 @@ def parse_args():
         ),
     )
     parser.add_argument(
+        "--multi-hypothesis-branch-heading-sigma-deg",
+        type=float,
+        default=None,
+        help=(
+            "交差点分岐選択(choose_branch_by_heading)の重み広がり(度、既定100000=事実上"
+            "一様乱択)。小さいほど直前の実測方位に近いエッジへ強く偏るが、"
+            "2026-08-30の検証では一様乱択を明確に上回らなかった(CHANGELOG.md参照)。"
+        ),
+    )
+    parser.add_argument(
         "--uncertainty-adaptive-particles",
         dest="uncertainty_adaptive_particles",
         action="store_true",
@@ -1485,6 +1508,7 @@ def apply_map_config(args, config, config_path):
     global AUTO_ROUTE_EXCLUDE_WIDE_ROOMS, AUTO_ROUTE_EXCLUDE_WIDE_ROOMS_RADIUS_PX
     global AUTO_ROUTE_CENTERLINE_ENABLED, AUTO_ROUTE_CENTERLINE_SIMPLIFY_PX
     global MULTI_HYPOTHESIS_ROUTING_ENABLED, MULTI_HYPOTHESIS_ROUTING_SIMPLIFY_PX
+    global MULTI_HYPOTHESIS_BRANCH_HEADING_SIGMA_DEG
     global N_PARTICLES_STRAIGHT, N_PARTICLES_TURNING, N_PARTICLES_STOPPED
     global SIGMA_STEP_STRAIGHT, SIGMA_STEP_TURNING, SIGMA_STEP_STOPPED
     global SIGMA_ANGLE_STRAIGHT, SIGMA_ANGLE_TURNING, SIGMA_ANGLE_STOPPED
@@ -1576,6 +1600,11 @@ def apply_map_config(args, config, config_path):
         args.multi_hypothesis_routing_simplify_px
         if args.multi_hypothesis_routing_simplify_px is not None
         else float(config.get("multi_hypothesis_routing_simplify_px", 10.0))
+    )
+    MULTI_HYPOTHESIS_BRANCH_HEADING_SIGMA_DEG = (
+        args.multi_hypothesis_branch_heading_sigma_deg
+        if args.multi_hypothesis_branch_heading_sigma_deg is not None
+        else float(config.get("multi_hypothesis_branch_heading_sigma_deg", 100000.0))
     )
     GYRO_UNIT = str(require_config_value(config, "gyro_unit", config_name)).lower()
     if GYRO_UNIT not in {"rad", "deg"}:
@@ -1716,6 +1745,7 @@ def load_map_config_for_tool(map_config_path):
         uncertainty_neff_high_ratio=None, uncertainty_boost_factor=None,
         uncertainty_shrink_factor=None,
         multi_hypothesis_routing_enabled=None, multi_hypothesis_routing_simplify_px=None,
+        multi_hypothesis_branch_heading_sigma_deg=None,
     )
     map_config, resolved_config_path = load_map_config(map_config_path)
     apply_map_config(fake_args, map_config, resolved_config_path)

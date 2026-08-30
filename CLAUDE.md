@@ -44,14 +44,14 @@
 - ヨーレート75パーセンタイル＋方位変化AND条件＋ヒステリシスによる屈折判定(`detect_move_behavior`。手ぶれによる誤検出を抑制)。
 - 二値地図からの経路帯自動抽出(`extract_auto_route_mask`, `route_source=auto`)。手動`route_points`を使わない空間制約。
 - 経路線分に連動した方位補正(`route_points`が前提の実装で、`route_source=auto`ではまだ未対応)。
-- 地図規模に応じ`map_configs/*.json`(`adaptive_pf`)で設定する様態別粒子数(現在の`kanri_4f.json`は250/600/100)＋Neff比率による不確実性適応粒子数(`configure_behavior`、既定OFF)。
+- 地図規模に応じ`map_configs/*.json`(`adaptive_pf`)で設定する様態別粒子数(現在の`kanri_4f.json`は250/600/100)＋Neff比率による不確実性適応粒子数(`configure_behavior`、`kanri_4f.json`は既定ON、2026-08-30)。
 - 開始位置登録・フォルダ監視・診断値記録・PNG自動保存を含む実験基盤。
 
 ## 現在の重要事項
 
 - `route_source=manual` の `prefer/enforce` は正解に近い手動経路を使う比較条件であり、最終提案方式ではない。
 - `route_source=auto` は二値地図から空間的な経路帯を抽出する。`extract_auto_route_mask`は通路と大きな部屋の壁際を区別できない設計限界を持つため、`exclude_wide_rooms`(既定OFF)で除外できる。`--auto-route-centerline`(既定OFF)と併用するとkanri_4fで曲がり角連動の方位補正が機能し、6シード検証で全滅回数-16.8%・終点誤差-18.5%を確認済み(除外半径が小さすぎると本物の合流点まで削れて破綻するため既定は無効。詳細はmemo/route_source_auto.md)。通路グラフ・複数経路仮説は未実装のまま。
-- 不確実性適応粒子数は既定OFF。Neff比率により粒子数を増減し、全滅回数は改善したが位置精度の一様な改善は未確認。
+- 不確実性適応粒子数は2026-08-30に既定ONへ確定(`kanri_4f.json`)。auto-enforce条件で全滅回数が6シード全てで改善(15.6→14.6回)することを根拠に採用。位置精度の一様な改善は未確認で、`route_constraint_mode=none`等の未検証条件ではわずかに悪化する場合もある(詳細はCHANGELOG.md 2026-08-30(5)項)。
 - `is_in_wall()`は`route_mask`を意図的に見ない設計(経路外は重みを0にする方式で対応)。`enforce`モードでもここは意図的にそうなっている — バグに見えても直さないこと。
 - 真のRMSEには時刻対応した正解位置データが必要。現在の終点x誤差は代替指標であり、RMSEと呼ばない。
 - `kanri_4f.json` の主比較対象は `0805_1438/1441/1442` の3CSV。L字合成地図(`map_configs/l_map.json`)は技術確認用で、auto経路抽出の主評価には使わない。
@@ -76,6 +76,8 @@ python pdr_pf_improved.py \
 cd pdr_program
 python compare_route_source.py --seeds 1 7 42 100 777 2024
 ```
+
+**注意(2026-08-30に発覚した失敗例)**: `--route-source auto`単体では経路帯マスクによる空間制約はかからない(`kanri_4f.json`の既定`route_constraint_mode`は`none`)。`--multi-hypothesis-routing`等を単独で動作確認する際も`--route-constraint-mode enforce`を明示的に付けないと、地図制約が実質オフのまま検証してしまい誤った結論を導く(実例: 2026-08-30、これに気づかず出した結論をCHANGELOG.md 2026-08-30(3)で訂正した)。`compare_route_source.py`の標準条件(`auto-enforce`等)を使うか、単独実行時は必ず`--route-constraint-mode enforce`を付けること。
 
 変更後は、少なくとも対象条件でスクリプトを実行し、以下を確認する。
 

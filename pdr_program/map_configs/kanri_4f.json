@@ -25,6 +25,7 @@
     "pdr_log_0624_14.csv"
   ],
   "adaptive_pf": {
+  "uncertainty_adaptive_particles": true,
   "particles_straight": 250,
   "particles_turning": 600,
   "particles_stopped": 100,
