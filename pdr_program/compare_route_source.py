@@ -43,10 +43,16 @@
 #   - 有効粒子率・経路内率・Neff平均・位置分散平均(PF診断ログの平均値)
 #   - 最終推定位置(x, y)
 #   - 終点x誤差 = |最終推定x - EXPECTED_ENDPOINT_X|
-#     (ユーザーが実測時の記憶から申告した「x=800前後で停止」という実測值を
-#      正解の代用として使う唯一の値。歩幅校正のtarget_distance_pxとは独立に、
-#      あくまで結果の評価にのみ使う値であり、パラメータをこれに合わせて
-#      調整する用途では使わない)
+#     (ユーザーが実測時の記憶から申告した「x=800前後で停止」という実測値を
+#      正解の代用として使う唯一の値。あくまで結果の評価にのみ使い、パラメータを
+#      これに合わせて調整する用途では使わない)
+#
+# 【2026-09-02の重要な訂正】このスクリプトは以前、--target-distance-px(既定815.0)で
+# 各CSVの推定総距離を815pxへ強制してから比較していた。つまり過去の比較実験はすべて
+# 「距離が正解に合わせ込まれた状態」で測っており、上流の距離推定の誤差(実際には
+# 1441/1442で4割不足していた)が完全に隠されていた。この機構はpdr_pf_improved.py側
+# ごと削除した(詳細はCHANGELOG.md 2026-09-02(7)項)。過去のresults/CSVの数値と
+# 現在の実行結果は、この点で条件が異なるため直接比較できない。
 #
 # 真のRMSE・曲がり位置誤差・経路選択成功率を計算するには、実測時に区間ごとの
 # 正解位置(タイムスタンプ付き)を記録する必要があり、これは進捗メモ§18.3の
@@ -91,7 +97,7 @@ DIAG_RE = re.compile(
 FINAL_RE = re.compile(r"最終推定位置: x=(?P<x>[-\d.]+), y=(?P<y>[-\d.]+)")
 
 
-def run_condition(map_config, seed, heading_source, target_distance_px, condition):
+def run_condition(map_config, seed, heading_source, condition):
     cmd = [
         sys.executable, str(PDR_SCRIPT),
         "--map-config", str(map_config),
@@ -105,8 +111,6 @@ def run_condition(map_config, seed, heading_source, target_distance_px, conditio
         cmd.append("--uncertainty-adaptive-particles")
     else:
         cmd.append("--no-uncertainty-adaptive-particles")
-    if target_distance_px is not None:
-        cmd += ["--target-distance-px", str(target_distance_px)]
     result = subprocess.run(cmd, capture_output=True, text=True, cwd=SCRIPT_DIR)
     if result.returncode != 0:
         print(f"[警告] 条件'{condition['label']}'の実行がエラー終了しました(returncode={result.returncode})", file=sys.stderr)
@@ -160,7 +164,6 @@ def main():
         help="複数シードで繰り返し実行し、結果の再現性(乱数依存性)を確認する。例: --seeds 1 7 42 100 777",
     )
     parser.add_argument("--heading-source", choices=["gyro", "android"], default="android")
-    parser.add_argument("--target-distance-px", type=float, default=815.0)
     parser.add_argument(
         "--expected-endpoint-x", type=float, default=None,
         help="終点x誤差の評価基準となる実測終点x座標(px)。指定しない場合、"
@@ -187,7 +190,7 @@ def main():
                   f"(route_constraint_mode={condition['route_constraint_mode']}, "
                   f"route_source={condition['route_source']}) を実行中... ===")
             log_text = run_condition(
-                args.map_config, seed, args.heading_source, args.target_distance_px, condition
+                args.map_config, seed, args.heading_source, condition
             )
             rows = parse_log(log_text)
             if not rows:

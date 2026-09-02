@@ -3,6 +3,7 @@
   "data_dir": "/Users/soma/Library/CloudStorage/GoogleDrive-satosoma0608@gmail.com/マイドライブ/PDR",
   "scale_px_per_m": 11.4,
   "step_gain": 1.0,
+  "step_length_calibration_gain": 2.10,
   "pf_erosion_radius_px": 1,
   "gyro_unit": "rad",
   "wall_weight_sigma": 0.6,

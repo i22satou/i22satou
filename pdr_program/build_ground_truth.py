@@ -89,6 +89,75 @@ def build_ground_truth(waypoints_df, landmarks_df):
     return merged[["timestamp", "x_px", "y_px", "point_type", "label", "seq"]]
 
 
+
+def _self_test():
+    """[本研究独自] 合成データによる自己テスト(2026-09-02追加)。
+
+    実測の正解位置データがまだ無い段階で、Phase 2の結合ロジック(seqでの突き合わせと
+    不一致の検出)が正しく動くことだけを確認する。evaluate_accuracy.py --self-test と
+    同じ考え方で、外部ファイルを一切必要としない。
+
+    【重要】ここで使う座標・timestampはすべて架空の値であり、ここから得られる数値を
+    研究結果として報告してはならない。確認しているのは配管であって精度ではない。
+    """
+    print("=== build_ground_truth.py 自己テスト(合成データ) ===")
+    ok = True
+
+    # (1) 正常系: seqが完全一致する場合、seq順に結合され必要な列が揃うこと
+    waypoints = pd.DataFrame({"timestamp": [10.5, 30.25, 55.0], "seq": [3, 1, 2]})
+    landmarks = pd.DataFrame({
+        "seq": [1, 2, 3],
+        "label": ["西端", "曲がり角A", "東端"],
+        "point_type": ["start", "corner", "end"],
+        "x_px": [100.0, 425.0, 800.0],
+        "y_px": [230.0, 230.0, 115.0],
+    })
+    merged = build_ground_truth(waypoints, landmarks)
+    expected_columns = ["timestamp", "x_px", "y_px", "point_type", "label", "seq"]
+    if list(merged.columns) != expected_columns:
+        print(f"  [NG] 列が想定と異なります: {list(merged.columns)}")
+        ok = False
+    elif list(merged["seq"]) != [1, 2, 3]:
+        print(f"  [NG] seq順に並んでいません: {list(merged['seq'])}")
+        ok = False
+    elif list(merged["timestamp"]) != [30.25, 55.0, 10.5]:
+        # seq=1のtimestampは30.25、seq=2は55.0、seq=3は10.5。
+        # waypoints側の行順(3,1,2)ではなくseqで正しく対応付けられているかを見る。
+        print(f"  [NG] seqとtimestampの対応が誤っています: {list(merged['timestamp'])}")
+        ok = False
+    else:
+        print(f"  [OK] 正常系: {len(merged)}点をseq順に結合、timestampの対応も正しい")
+
+    # (2) 異常系: waypoints側にseqが多い(ボタンの押し過ぎ)
+    extra_wp = pd.DataFrame({"timestamp": [10.0, 20.0, 30.0, 40.0], "seq": [1, 2, 3, 4]})
+    try:
+        build_ground_truth(extra_wp, landmarks)
+        print("  [NG] 押し過ぎ(seq=4が余分)を検出できませんでした")
+        ok = False
+    except ValueError as error:
+        if "4" in str(error) and "押し過ぎ" in str(error):
+            print("  [OK] 押し過ぎ(waypoints側に余分なseq)を検出し、該当seqを報告した")
+        else:
+            print(f"  [NG] 例外は出たが内容が不十分: {error}")
+            ok = False
+
+    # (3) 異常系: landmarks側にseqが多い(ボタンの押し忘れ)
+    missing_wp = pd.DataFrame({"timestamp": [10.0, 20.0], "seq": [1, 3]})
+    try:
+        build_ground_truth(missing_wp, landmarks)
+        print("  [NG] 押し忘れ(seq=2が欠落)を検出できませんでした")
+        ok = False
+    except ValueError as error:
+        if "2" in str(error) and "押し忘れ" in str(error):
+            print("  [OK] 押し忘れ(landmarks側に未計測のseq)を検出し、該当seqを報告した")
+        else:
+            print(f"  [NG] 例外は出たが内容が不十分: {error}")
+            ok = False
+
+    print("  -> すべて正常" if ok else "  -> 失敗あり")
+    return ok
+
+
 def main():
     parser = argparse.ArgumentParser(
         description=(
@@ -97,17 +166,29 @@ def main():
             "詳細はこのファイル冒頭のコメントを参照。"
         )
     )
-    parser.add_argument("--waypoints", type=Path, required=True,
+    parser.add_argument("--waypoints", type=Path, default=None,
                          help="Android端末で記録された *_waypoints.csv (timestamp, seq)。")
-    parser.add_argument("--landmarks", type=Path, required=True,
+    parser.add_argument("--landmarks", type=Path, default=None,
                          help="pick_landmarks.pyで作った目印座標表(seq, label, point_type, x_px, y_px)。")
     parser.add_argument("--output", type=Path, default=None,
                          help="出力先。省略時は<waypoints名>_ground_truth.csvを同じ場所に保存。")
+    parser.add_argument("--self-test", action="store_true",
+                         help="合成データで結合ロジックだけを確認する(実測ファイル不要)。")
     args = parser.parse_args()
 
-    waypoints_df = load_waypoints(args.waypoints)
-    landmarks_df = load_landmarks(args.landmarks)
-    ground_truth_df = build_ground_truth(waypoints_df, landmarks_df)
+    if args.self_test:
+        raise SystemExit(0 if _self_test() else 1)
+    if args.waypoints is None or args.landmarks is None:
+        parser.error("--waypoints と --landmarks の両方を指定するか、--self-test を使ってください。")
+
+    # 押し忘れ・押し過ぎ・列不足はいずれも「利用者が直せる入力の問題」なので、
+    # トレースバックではなくメッセージだけを出して終了する(2026-09-02)。
+    try:
+        waypoints_df = load_waypoints(args.waypoints)
+        landmarks_df = load_landmarks(args.landmarks)
+        ground_truth_df = build_ground_truth(waypoints_df, landmarks_df)
+    except (ValueError, FileNotFoundError) as error:
+        raise SystemExit(f"エラー: {error}")
 
     output_path = args.output
     if output_path is None:

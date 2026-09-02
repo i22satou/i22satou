@@ -18,7 +18,9 @@ route_source=autoの検証中に見つかった1441/1442の謎)は、両方の�
 |---|---|
 | [memo/route_source_auto.md](memo/route_source_auto.md) | route_source=auto(二値地図からの経路帯マスク自動抽出)の実装・none/manual/auto比較実験・L字マップでの第二検証環境の試み(不採用)・中心線抽出の実装と、通路/部屋境界を区別するexclude_wide_roomsの実装(6シード検証で全滅回数-16.8%・終点誤差-18.5%、既定OFF) |
 | [memo/uncertainty_particles.md](memo/uncertainty_particles.md) | 不確実性適応粒子数(§6.5)の実装・6シード検証・4パラメータの感度分析(初期値は妥当と確認) |
-| [memo/sensor_mystery.md](memo/sensor_mystery.md) | pdr_log_0805_1441.csv vs 1442.csvの性能差調査(**未解決**)。センサー品質診断・複数シード再検証 |
+| [memo/heading_calibration.md](memo/heading_calibration.md) | 方位の質のCSVごとの差・初期方位校正方式(samples/walking)・1438の逆走仮説の検定(棄却) |
+| [memo/step_length_calibration.md](memo/step_length_calibration.md) | ステップ検出の過検出(第2高調波)・歩幅の過小推定と校正ゲイン。**sensor_mysteryの1441/1442問題の答え** |
+| [memo/sensor_mystery.md](memo/sensor_mystery.md) | 1441/1442の性能差(**2026-09-02解決**)。棄却した仮説一覧と「上流を先に疑う」教訓 |
 | [memo/file_cleanup.md](memo/file_cleanup.md) | 不要ファイルの「削除候補」フォルダへの移動(2026-08-15) |
 | [memo/pipeline_fixes.md](memo/pipeline_fixes.md) | pdr_pf_improved.py本体の初期バグ修正(route_points座標修正、prefer/enforceの挙動修正、未使用コード削除、pdr_pf_clickstart.pyとの差分解消) |
 | [memo/android_app.md](memo/android_app.md) | PDR計測アプリ(Android)のCSVフォーマット拡張・コードレビュー |
@@ -38,8 +40,9 @@ route_source=autoの検証中に見つかった1441/1442の謎)は、両方の�
   数値」「却下した仮説の一覧(1行ずつ)」「再利用可能な教訓・落とし穴」だけの短い形に
   書き換える。試行錯誤の過程そのもの(何日目に何を試したか等)は削ってよい —
   「何を却下したか」という結論だけ残せば、同じ検証をやり直す事故は防げる。
-- **まだ未解決・調査継続中の話題は圧縮しない**(例: [memo/sensor_mystery.md](memo/sensor_mystery.md)の
-  1441/1442問題。次に調査を再開する時、何を試して何が分かったかの詳細が要る)。
+- **まだ未解決・調査継続中の話題は圧縮しない**(次に調査を再開する時、何を試して何が
+  分かったかの詳細が要るため)。決着したら圧縮する
+  ([memo/sensor_mystery.md](memo/sensor_mystery.md)は2026-09-02の解決を受けて圧縮済み)。
 - **運用上の落とし穴・注意("preferモードは扉の隙間から漏れるのでenforceを使う"の
   類)は圧縮後も必ず残す**。これは履歴ではなく現在も有効な運用知識のため。
 - **`.py`の変更履歴コメントと内容が重複するだけの記述は圧縮時に削ってよい**

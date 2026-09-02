@@ -75,7 +75,7 @@ def build_combos():
     return combos
 
 
-def run_combo(map_config, seed, heading_source, target_distance_px, params):
+def run_combo(map_config, seed, heading_source, params):
     cmd = [
         sys.executable, str(PDR_SCRIPT),
         "--map-config", str(map_config),
@@ -88,8 +88,6 @@ def run_combo(map_config, seed, heading_source, target_distance_px, params):
     ]
     for axis, value in params.items():
         cmd += [CLI_FLAG[axis], str(value)]
-    if target_distance_px is not None:
-        cmd += ["--target-distance-px", str(target_distance_px)]
     result = subprocess.run(cmd, capture_output=True, text=True, cwd=SCRIPT_DIR)
     if result.returncode != 0:
         print(f"[警告] 実行がエラー終了しました(returncode={result.returncode})", file=sys.stderr)
@@ -106,7 +104,6 @@ def main():
         help="複数シードで繰り返し実行する。例: --seeds 1 7 42 100 777 2024",
     )
     parser.add_argument("--heading-source", choices=["gyro", "android"], default="android")
-    parser.add_argument("--target-distance-px", type=float, default=815.0)
     parser.add_argument(
         "--expected-endpoint-x", type=float, default=None,
         help="終点x誤差の評価基準となる実測終点x座標(px)。既知のmap_configなら省略可。",
@@ -134,7 +131,7 @@ def main():
         for seed in seeds:
             done += 1
             print(f"[{done}/{total}] combo={combo_label} seed={seed} を実行中... ", end="", flush=True)
-            log_text = run_combo(args.map_config, seed, args.heading_source, args.target_distance_px, params)
+            log_text = run_combo(args.map_config, seed, args.heading_source, params)
             rows = parse_log(log_text)
             if not rows:
                 print("診断値を抽出できませんでした。", file=sys.stderr)

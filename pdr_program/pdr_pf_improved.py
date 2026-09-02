@@ -2,18 +2,22 @@
 # pdr_pf_improved.py
 #
 # 【変更履歴】
-# 全履歴はCHANGELOG.md参照(2026-08-16にここから切り出した)。変更したら
-# CHANGELOG.mdの先頭に日付付きで1項目追加すること。直近の変更のみ下記に残す:
-# - 2026-08-30: [本研究独自] 複数経路仮説PFの交差点分岐選択に、直前の実測方位で
-#               重み付けする方式(choose_branch_by_heading、pdr_route_graph.py、
-#               --multi-hypothesis-branch-heading-sigma-degで調整)を追加。ただし
-#               正解経路との照合の結果、一様乱択を明確に上回る効果は確認できな
-#               かったため、既定値を一様乱択相当(σ=100000)に戻した。関数自体は
-#               今後の再検討用に残している(詳細はCHANGELOG.md 2026-08-30(3)(4)項)。
-# - 2026-08-16: [本研究独自] 複数経路仮説PF(粒子単位のグラフ分岐PF方式)の
-#               第一段階として、build_route_graph_topology()・
-#               nearest_edge_position()・ParticleFilterPDRへの接続を実装。
-#               --multi-hypothesis-routing(既定OFF)で有効化。詳細はCHANGELOG.md。
+# 全履歴はCHANGELOG.md。変更したらCHANGELOG.mdの先頭へ日付付きで1項目追加すること。
+# 直近のみ下記に残す(古い項目は消してよい):
+# - 2026-09-02: PDR上流(距離・方位)の系統誤差を4点修正。(1)ステップ検出が歩行加速度
+#               の第2高調波に反応し歩数を約1.7〜1.8倍に過検出していた問題を、最短
+#               ピーク間隔を上限歩調ベース(MAX_STEP_FREQUENCY_HZ)へ変更して是正。
+#               (2)歩幅の約1/2過小推定へ校正ゲインSTEP_LENGTH_CALIBRATION_GAINを追加。
+#               (1)(2)は逆向きの誤差でファイルごとに異なる割合で相殺しており、
+#               memo/sensor_mystery.mdの1441/1442問題の真因だった。(3)PF重みの
+#               「方位ズレの重み」が提案分布の二重計上だったため削除。(4)初期方位校正に
+#               歩行開始基準(walking、既定OFF)を追加。(5)乱数シードのCSV独立化と、
+#               複数経路仮説PFの方位補正のroute_constraint_mode分岐。
+#               詳細はCHANGELOG.md 2026-09-02(1)〜(5)項。
+# - 2026-08-30: [本研究独自] 複数経路仮説PFの交差点分岐選択に方位重み付け
+#               (choose_branch_by_heading、pdr_route_graph.py)を追加したが、正解経路
+#               との照合で一様乱択を上回らず、既定を一様乱択相当(σ=100000)へ戻した。
+#               関数は--multi-hypothesis-branch-heading-sigma-degで再検討可能。
 #
 # 【既知開始位置の設定】
 # - 未登録のPDRデータは、地図上で実際の計測開始位置をクリックして指定する。
@@ -61,159 +65,53 @@
 # - preferやenforceの軌跡が設定経路へ近づいても、
 #   その結果だけでは位置推定精度の向上を証明したことにはならない。
 #
-# 【経路線分切替】
-# - 従来は、すべてのCSVでroute_segment_indexを0から開始していた。
-# - 修正後は、クリックした開始位置とroute_pointsの各線分との距離を計算し、
-#   開始位置に最も近い経路線分を初期線分として選択する。
-# - 曲がり検出をturn_pendingとして保持し、
-#   PF推定位置が設定曲がり角付近へ到達した場合だけ次の線分へ進める。
-# - 判定順を「センサー方位、移動様態判定、経路線分切替、
-#   方位補正、PF更新」の順番とする。
-# - 最近傍線分を毎歩選び直す方式は使用せず、
-#   CSVごとに原則として単調増加するroute_segment_indexを保持する。
-# - 曲がり終了後も切り替え後の経路線分を維持し、
-#   前の通路方向へ戻らないようにする。
-# - 経路制約モードがnoneの場合は、経路線分による方位補正を使用しない。
+# 【経路線分切替】(route_source=manual + prefer/enforce のとき)
+# - クリック開始位置に最も近い経路線分を初期線分として選ぶ。
+# - 曲がり検出はturn_pendingとして保持し、PF推定位置が設定曲がり角付近へ到達した
+#   時だけ次の線分へ進める(最近傍線分を毎歩選び直す方式は使わない)。
+# - 判定順は「センサー方位 → 移動様態判定 → 経路線分切替 → 方位補正 → PF更新」。
+# - 切替後の線分は維持し、前の通路方向へは戻さない。
+# - route_constraint_mode=noneでは経路線分による方位補正を使用しない
+#   (複数経路仮説PF側も2026-09-02に同じ挙動へ揃えた)。
 #
 # 【移動様態判定】
 # - 歩行者の移動様態をSTOPPED、STRAIGHT、TURNINGの3状態で判定する。
-# - 曲がり判定には、一定時間内の方位変化とヨーレートを併用する。
-# - ヨーレートの瞬間的な最大値ではなく、75パーセンタイルを使用し、
-#   手ぶれなどの外れ値の影響を抑える。
-# - 曲がり開始条件は、方位変化とヨーレートの両方が
-#   閾値を超えた場合に成立するAND条件とする。
-# - 曲がり終了時は、方位変化とヨーレートの両方が
-#   終了閾値より小さいことを要求する。
-# - TURNING判定にはヒステリシスを導入し、
-#   STRAIGHTとTURNINGの頻繁な状態変化を防止する。
+# - 曲がり判定は、一定時間内の方位変化とヨーレートのAND条件で行う。
+# - ヨーレートは瞬間最大値ではなく75パーセンタイルを使い、手ぶれの影響を抑える。
+# - TURNING判定にヒステリシスを入れ、STRAIGHT/TURNINGの頻繁な振動を防ぐ。
 #
 # 【移動様態適応型パーティクルフィルタ】
-# - 直進時、曲がり時、滞留時でパーティクル数を動的に変更する。
-# - 現在のJSON設定例は、直進250個、曲がり600個、滞留100個である。
-# - 直進時、曲がり時、滞留時で歩幅ノイズと方位ノイズを変更する。
-# - 直進時は探索範囲を狭くし、曲がり時は方位探索範囲を広げる。
-# - パーティクル数を変更する場合は、現在の重みに従って再サンプリングする。
-# - パーティクル数を増加させる場合は、複製粒子へ微小な位置摂動を加える。
-# - リサンプリング、壁衝突判定、全滅復帰処理を
-#   可変パーティクル数へ対応させる。
-# - CSVごとに、各移動様態の更新回数、平均粒子数、
-#   最小粒子数、最大粒子数、全滅回数をログへ出力する。
+# - 直進/曲がり/滞留で粒子数・歩幅ノイズ・方位ノイズを切り替える
+#   (現在のJSON設定は直進250/曲がり600/滞留100)。
+# - 粒子数の変更は現在の重みに従うリサンプリングで行い、増加時は複製粒子へ
+#   微小な位置摂動を加える。壁衝突判定・全滅復帰も可変粒子数に対応する。
+# - パラメータはmap_configs/*.jsonのadaptive_pfセクションで変更する。
+#   先行研究は直進10/屈折20だが、本研究は対象地図が複雑なため比率を保って拡大した。
 #
-# 【PF診断値】
-# - 各PF更新において、壁へ衝突しなかった粒子の割合を
-#   有効粒子率として記録する。
-# - route_pointsから作成した経路マスク内にある粒子の割合を
-#   経路内粒子率として記録する。
-# - 正規化後の粒子重みから実効サンプルサイズNeffを計算する。
-# - 粒子のx座標分散とy座標分散の合計を位置分散として記録する。
-# - CSVごとの処理終了時に、有効粒子率、経路内粒子率、
-#   平均Neff、平均位置分散をログへ出力する。
-# - 有効粒子率が低い場合は、壁へ衝突する粒子が多い可能性がある。
-# - Neffが低い場合は、少数の粒子へ重みが集中している可能性がある。
-# - 位置分散が大きい場合は、推定位置の不確実性が高い可能性がある。
-# - noneモードでは経路マスクが全領域を表すため、
-#   経路内粒子率は原則として1に近くなる。
+# 【PF診断値】(CSVごとに処理終了時へログ出力)
+# - 有効粒子率: 壁へ衝突しなかった粒子の割合。低いと壁に当たる粒子が多い。
+# - 経路内粒子率: 経路帯マスク内にある粒子の割合。noneではマスクが全領域のため1に近い。
+# - Neff: 正規化後の重みから求める実効サンプルサイズ。低いと少数の粒子へ重みが集中。
+# - 位置分散: 粒子のx分散とy分散の和。大きいと推定位置の不確実性が高い。
 #
 # 【キャッシュ判定】
-# - 入力CSVの更新時刻とファイルサイズに加えて、
-#   次の条件が一致した場合だけ計算結果を再利用する。
-#     ・クリック開始位置
-#     ・経路制約モード
-#     ・方位推定方法
-#     ・地図上の初期方位
-#     ・初期方位校正に使用するサンプル数
-#     ・route_points
-#     ・経路方位補正の重み
-#     ・経路外粒子の重み
-# - 開始位置や実行条件を変更した後に、
-#  以前の条件で計算した結果が誤って再利用されることを防止する。
-#
-# 【結果グラフ】
-# - 各CSVの推定軌跡を異なる色で表示する。
-# - 開始位置は、対応する軌跡と同じ色の点で表示する。
-# - 開始位置の点には白い縁を付け、軌跡との区別をしやすくする。
-# - 凡例はCSV名ごとに1項目とし、軌跡と開始点の重複表示を防ぐ。
-# - グラフタイトルへ経路制約モードと方位推定方法を表示する。
-# - 保存された画像だけを見ても実行条件を判別できるようにする。
-#
-# 【test11_gemini.pyからの主な変更点】
-# 1. 歩行者の移動様態をSTOPPED、STRAIGHT、TURNINGの3状態で判定する。
-# 2. 移動様態に応じてパーティクル数を動的に変更する。
-# 3. 移動様態に応じて歩幅ノイズと方位ノイズを変更する。
-# 4. 曲がり判定に方位変化とヨーレートを併用する。
-# 5. TURNING判定にヒステリシスを導入する。
-# 6. パーティクル増減時に重みに従って再サンプリングする。
-# 7. パーティクル増加時に微小な位置摂動を加える。
-# 8. リサンプリングと全滅復帰を可変パーティクル数へ対応させる。
-# 9. CSVごとに移動様態、粒子数、全滅回数、PF診断値を出力する。
-# 10. CSVごとの既知開始位置を地図クリックで登録して再利用する。
-# 11. 初期方位を地図座標系へ合わせる。
-# 12. ジャイロ方位とAndroid方位を切り替えて比較できるようにする。
-# 13. 手動経路の使用方法をnone、prefer、enforceへ分離する。
-#
-# 【主な実行例】
-#
-# 経路制約なし、ジャイロ方位、右方向から開始:
-# python pdr_pf_improved.py \
-#   --route-constraint-mode none \
-#   --heading-source gyro \
-#   --initial-heading-deg 0 \
-#   --no-watch \
-#   --seed 42 \
-#   --save result_none_gyro.png
-#
-# 経路制約なし、Android方位、右方向から開始:
-# python pdr_pf_improved.py \
-#   --route-constraint-mode none \
-#   --heading-source android \
-#   --initial-heading-deg 0 \
-#   --heading-calibration-samples 30 \
-#   --no-watch \
-#   --seed 42 \
-#   --save result_none_android.png
-#
-# 経路優先、ジャイロ方位、右方向から開始:
-# python pdr_pf_improved.py \
-#   --route-constraint-mode prefer \
-#   --heading-source gyro \
-#   --initial-heading-deg 0 \
-#   --no-watch \
-#   --seed 42 \
-#   --save result_prefer_gyro.png
-#
-# 経路強制、ジャイロ方位、右方向から開始:
-# python pdr_pf_improved.py \
-#   --route-constraint-mode enforce \
-#   --heading-source gyro \
-#   --initial-heading-deg 0 \
-#   --no-watch \
-#   --seed 42 \
-#   --save result_enforce_gyro.png
+# 入力CSVのmtime・サイズに加え、開始位置・経路制約モード・方位設定・route_points・
+# 経路重みが一致した場合だけ再利用する(実行条件を変えた後に古い結果を誤って
+# 使い回さないため)。キャッシュはプロセス内のみで、監視モードの再描画用。
 #
 # 【注意】
-# - 論文では直進10個、屈折20個としているが、
-#   本プログラムでは複雑な地図に対応するため、
-#   同程度の比率を保ちながらJSONで直進250個、曲がり600個に設定している。
-# - 各パラメータはmap_configs/kanri_4f.jsonの
-#   adaptive_pfセクションで変更できる。
-# - --heading-source androidを使用する場合は、
-#   入力CSVにyaw_deg列が必要である。
-# - 初期方位を安定して取得するため、AndroidアプリでSTARTを押した後は、
-#   短時間静止してから歩き始めることが望ましい。
-# - 現在の--initial-heading-degは1回の実行で全CSVへ共通に適用される。
-# - 開始方向が異なるCSVは、開始方向ごとに分けて実行する必要がある。
-# - 現在の二値地図では、廊下と部屋が同じ移動可能領域として
-#   扱われる場合がある。
-# - noneモードでは、部屋への誤進入や誤った通路選択が
-#   発生する可能性がある。
-# - preferとenforceは手動route_pointsを使用するため、
-#   本研究の最終提案方式ではなく比較方式として扱う。
-# - 軌跡画像が正解経路に近く見えることだけでは、
-#   位置推定精度の改善を証明できない。
-# - 平均位置誤差、RMSE、最終位置誤差、曲がり位置誤差を求めるには、
-#   正解位置または正解経路データが別途必要である。
-# - 今後は、廊下・部屋・ドアの領域分類、通路中心線の自動抽出、
-#   手動正解経路を使用しない複数経路推定を追加する必要がある。
+# - --heading-source androidは入力CSVにyaw_deg列が必要。
+# - **AndroidアプリでSTARTを押した後は3〜5秒静止してから歩き始め、歩行中は端末の
+#   持ち方を変えないこと。** 初期方位の基準がここで決まるため、守られていない記録は
+#   方位が経路と整合しなくなる(2026-09-02にpdr_log_0805_1438/1441で実害を確認。
+#   詳細はmemo/heading_calibration.md)。
+# - --initial-heading-degは1回の実行で全CSVへ共通に適用される。開始方向が異なる
+#   CSVは分けて実行する。
+# - 二値地図では廊下と部屋が同じ移動可能領域になる場合があり、noneモードでは
+#   部屋への誤進入や誤った通路選択が起きうる。
+# - prefer/enforceは手動route_pointsを使うため、最終提案方式ではなく比較方式。
+# - 軌跡画像が正解経路に近く見えることだけでは位置推定精度の改善を証明できない。
+#   RMSE等には時刻対応した正解位置データが別途必要(evaluate_accuracy.py)。
 #
 # 【本プログラムの研究的位置づけ(卒業論文 第2章・第5章の執筆用メモ)】
 # 本プログラムは以下2件の先行研究を基礎とし、そこに本研究独自の拡張を加えている。
@@ -270,6 +168,7 @@ import time
 import argparse
 import threading
 import glob
+import zlib
 from pathlib import Path
 from enum import Enum
 
@@ -290,9 +189,6 @@ import matplotlib.pyplot as plt
 from scipy.signal import find_peaks
 from scipy import ndimage
 from PIL import Image
-# [本研究独自] route_source=autoの通路帯マスクを細線化して中心線を得るために使用
-# (extract_ordered_centerline)。新規ライブラリ依存(既に環境に導入済み)。
-from skimage.morphology import skeletonize
 
 # [本研究独自] 経路帯マスク抽出・通路グラフ化関連の関数群(2026-08-16、ファイル
 # 肥大化を受けてpdr_route_graph.pyへ切り出した)。関数の中身は移動前と完全に同じで、
@@ -339,7 +235,6 @@ DEFAULT_MAP_CONFIG = BASE_DIR / "map_configs" / "kanri_4f.json"
 START_POSITION_FILE = BASE_DIR / "start_positions.csv"
 RESULTS_DIR = BASE_DIR / "results"
 M_TO_PIXEL = 11.4
-TARGET_DISTANCE_PX = None
 DEFAULT_STEP_GAIN = 1.0
 PF_EROSION_RADIUS_PX = 1
 
@@ -428,6 +323,14 @@ UNCERTAINTY_SHRINK_FACTOR = 0.75
 UNCERTAINTY_PARTICLES_MIN = 80
 UNCERTAINTY_PARTICLES_MAX = 1200
 
+# [本研究独自] ステップ検出の最短ピーク間隔は、歩行の生理的な上限歩調から導出する。
+# 従来のSTEP_MIN_INTERVAL=5(サンプル数の直書き)は52.9Hzでは上限10.6歩/sに相当し
+# 事実上無制限で、検出器が歩行加速度の第2高調波(基本波1.6〜1.7Hzに対する3.3〜3.4Hz)
+# にも反応して歩数を約1.7〜1.8倍に過検出していた(memo/step_length_calibration.md)。
+# 上限2.9Hz(=174歩/分)は歩行と走行の境界で、速く歩いても歩行である限り超えない。
+# サンプル数ではなく周波数を固定することで、記録レートが変わっても歩調上限を保つ
+# (STEP_MIN_INTERVALはサンプリング周波数が不明な場合のフォールバック)。
+MAX_STEP_FREQUENCY_HZ = 2.9
 STEP_MIN_INTERVAL = 5
 
 MIN_STEP_M = 0.25
@@ -445,11 +348,25 @@ ROOT_GAMMA       = -1.259
 LOG_BETA         = 1.131
 LOG_GAMMA        = 0.159
 
-HCOR_THR  = np.deg2rad(5)
-HMAG_THR  = np.deg2rad(2)
-W_PREV    = 2.0
-W_MAG     = 1.0
-W_GYRO    = 2.0
+# [本研究独自] 歩幅推定式の被験者・端末校正ゲイン。SmartPDRのβ・γ係数は原論文の
+# 計測環境で同定された値で、本研究の環境では歩幅を約1/2に過小推定するため導入した。
+# 上下限クリップ(MIN_STEP_M/MAX_STEP_M)の前に適用する(クリップ後に掛かるstep_gainと
+# 分けたのは、上下限を歩幅の物理的な範囲として保つため)。
+# 【重要】総距離を特定の終点へ合わせる機構ではない。全CSV共通の定数を1つ掛けるだけで、
+# 短く歩いたデータは短いまま出る。ファイルごとに総距離を目標値へ強制する機構
+# (target_distance_px)は2026-09-02に削除した — 今後の計測ではあえて歩行距離を変える
+# 予定があり、終点を固定する校正は方法論として使わないため。
+# kanri_4f.jsonの2.10は評価用と同じ3CSVで求めた暫定値なので、次回計測の校正専用
+# データで再同定すること(memo/step_length_calibration.md)。
+STEP_LENGTH_CALIBRATION_GAIN = 1.0
+
+# [本研究独自] 初期方位校正の方式(2026-09-02追加)。
+# "samples"(既定・従来方式)は記録先頭のheading_calibration_samples個を円平均する。
+# "walking"は歩き始めてからのHEADING_CALIBRATION_STEPS歩の方位を円平均する。
+# 既定を"samples"のままにしているのは、既存の比較実験の結果を変えないため。
+# 詳細はestimate_initial_sensor_heading()のdocstring参照。
+HEADING_CALIBRATION_MODE = "samples"
+HEADING_CALIBRATION_STEPS = 10
 
 SMOOTH_WINDOW  = 2
 RECOVERY_SIGMA = 8.0
@@ -646,6 +563,18 @@ def get_or_select_start_position(file_name, map_image, pf_map, saved_positions):
         save_start_position(file_name, start_x, start_y)
         saved_positions[file_name] = (start_x, start_y)
         return start_x, start_y
+
+
+# [本研究独自] CSVごとに独立した乱数系列を割り当てるためのシード。従来はmain()で
+# np.random.seed()を一度呼ぶだけで、複数CSVがファイル名順に同じ乱数ストリームを
+# 消費しており、CSVを1本足すだけで後続の結果が変わる・ファイル別の性能差にファイル順が
+# 交絡する、という再現性の問題があった。zlib.crc32を使うのは組み込みhash()が
+# プロセスごとにランダム化され再現しないため。
+def file_random_seed(base_seed, file_name):
+    """基準シードとCSVファイル名から、そのCSV専用の乱数シードを返す。"""
+    if base_seed is None:
+        return None
+    return (int(base_seed) + zlib.crc32(file_name.encode("utf-8"))) % (2 ** 32)
 
 
 def safe_read_csv(file_path, max_retries=5, delay=0.2):
@@ -1094,7 +1023,10 @@ class ParticleFilterPDR:
         corrected_step_heading = step_heading
         if self.route_topology is not None:
             self._advance_route_state(step_heading)
-            corrected_step_heading = self._route_corrected_headings(step_heading)
+            # route_guidance_enabled()と同じく、prefer/enforceのときだけ地図由来の
+            # 方位補正を使う(noneは「地図の経路情報を方位に使わない」比較条件)。
+            if ROUTE_CONSTRAINT_MODE in {"prefer", "enforce"}:
+                corrected_step_heading = self._route_corrected_headings(step_heading)
 
         # 1. 状態遷移（移動様態ごとのノイズ付与）
         noise_dist = np.random.normal(0, self.params['sigma_step'], self.n_particles)
@@ -1136,13 +1068,15 @@ class ParticleFilterPDR:
         spread = np.var(new_particles[:, 0]) + np.var(new_particles[:, 1])
         self.position_spread_history.append(float(spread))
         
-        # 方位ズレの重み
-        particle_heading_error = angle_diff(p_angle, corrected_step_heading)
-        weights *= np.exp(
-            -(particle_heading_error ** 2) /
-            (2 * self.params['sigma_angle'] ** 2)
-        )
-        
+        # [本研究独自] ここにあった「方位ズレの重み」は2026-09-02に削除した。
+        # p_angle = corrected_step_heading + noise_angle と定義した直後に
+        # angle_diff(p_angle, corrected_step_heading) をガウス密度で評価しており、
+        # これは noise_angle と恒等的に一致する = 提案分布の密度でそのサンプル自身を
+        # 重み付ける二重計上だった。観測情報を含まないので尤度として意味を持たず、
+        # 方位分散を sigma_angle/√2 へ縮め、Neffを約13%押し下げるだけだった。
+        # ブートストラップPFでは重みは観測尤度(壁尤度と経路帯マスク)のみであるべき。
+        # 再追加を検討する場合はCHANGELOG.md 2026-09-02(3)項の「今後の候補」を読むこと。
+
         # 壁に当たったものは即座に重み0
         weights[hit_wall] = 0.0
 
@@ -1253,21 +1187,21 @@ def parse_args():
         help="乱数シード。結果を再現したいときに指定します。",
     )
     parser.add_argument(
-        "--target-distance-px",
-        type=float,
-        default=None,
-        help="歩幅を校正する目標移動距離(px)。指定するとJSONの値を上書きします。",
-    )
-    parser.add_argument(
-        "--no-step-calibration",
-        action="store_true",
-        help="SmartPDR歩幅の総距離校正を行いません。",
-    )
-    parser.add_argument(
         "--step-gain",
         type=float,
         default=None,
         help="校正後の歩幅に掛ける追加倍率。指定するとJSONの値を上書きします。",
+    )
+    parser.add_argument(
+        "--step-length-calibration-gain",
+        type=float,
+        default=None,
+        help=(
+            "[本研究独自] 歩幅推定式の被験者・端末校正ゲイン(上下限クリップの前に適用)。"
+            "SmartPDRのβ・γ係数は原論文の計測環境で同定された値のため、本研究の環境では"
+            "そのままだと歩幅を約1/2に過小推定する。既定はJSON設定"
+            "(kanri_4f.jsonは2.10、暫定値。CHANGELOG.md 2026-09-02(2)項参照)。"
+        ),
     )
     parser.add_argument(
         "--no-watch",
@@ -1455,7 +1389,24 @@ def parse_args():
         "--heading-calibration-samples",
         type=int,
         default=30,
-        help="開始方位の基準値を求める先頭サンプル数。",
+        help="開始方位の基準値を求める先頭サンプル数(--heading-calibration-mode samples時)。",
+    )
+    parser.add_argument(
+        "--heading-calibration-mode",
+        choices=["samples", "walking"],
+        default=None,
+        help=(
+            "[本研究独自] 開始方位の基準の取り方。samples=記録先頭の数サンプル(既定、従来方式)、"
+            "walking=歩き始めてからの数歩分。計測開始直後にまだ端末を持ち替えている場合、"
+            "samplesでは基準方位が壊れる(2026-09-02の診断で1438/1441に該当)。"
+            "既定はJSON設定(無指定ならsamples)。"
+        ),
+    )
+    parser.add_argument(
+        "--heading-calibration-steps",
+        type=int,
+        default=None,
+        help="walking方式で基準方位の計算に使う先頭ステップ数(既定10)。",
     )
     parser.add_argument(
         "--log-level",
@@ -1499,7 +1450,9 @@ def require_config_value(mapping, key, source_name):
 
 
 def apply_map_config(args, config, config_path):
-    global M_TO_PIXEL, TARGET_DISTANCE_PX, DEFAULT_STEP_GAIN
+    global M_TO_PIXEL, DEFAULT_STEP_GAIN
+    global STEP_LENGTH_CALIBRATION_GAIN
+    global HEADING_CALIBRATION_MODE, HEADING_CALIBRATION_STEPS
     global PF_EROSION_RADIUS_PX
     global WALL_WEIGHT_SIGMA, WALL_WEIGHT_FLOOR, OFF_ROUTE_WEIGHT
     global ROUTE_WIDTH_PX, ROUTE_HEADING_WEIGHT, ROUTE_CORNER_THRESHOLD_PX
@@ -1521,9 +1474,26 @@ def apply_map_config(args, config, config_path):
     config_dir = config_path.parent
     config_name = str(config_path)
     M_TO_PIXEL = float(require_config_value(config, "scale_px_per_m", config_name))
-    target = config.get("target_distance_px")
-    TARGET_DISTANCE_PX = None if target is None else float(target)
     DEFAULT_STEP_GAIN = float(require_config_value(config, "step_gain", config_name))
+    # 歩幅校正ゲインは任意設定(無ければ1.0=校正なしで従来通りの挙動)。
+    STEP_LENGTH_CALIBRATION_GAIN = (
+        args.step_length_calibration_gain
+        if args.step_length_calibration_gain is not None
+        else float(config.get("step_length_calibration_gain", 1.0))
+    )
+    # 初期方位校正方式は任意設定(無ければ従来方式samples)。
+    HEADING_CALIBRATION_MODE = (
+        args.heading_calibration_mode
+        if args.heading_calibration_mode is not None
+        else str(config.get("heading_calibration_mode", "samples")).lower()
+    )
+    if HEADING_CALIBRATION_MODE not in {"samples", "walking"}:
+        raise ValueError("heading_calibration_modeはsamplesまたはwalkingのいずれかです。")
+    HEADING_CALIBRATION_STEPS = (
+        args.heading_calibration_steps
+        if args.heading_calibration_steps is not None
+        else int(config.get("heading_calibration_steps", 10))
+    )
     PF_EROSION_RADIUS_PX = int(require_config_value(config, "pf_erosion_radius_px", config_name))
     WALL_WEIGHT_SIGMA = float(require_config_value(config, "wall_weight_sigma", config_name))
     WALL_WEIGHT_FLOOR = float(require_config_value(config, "wall_weight_floor", config_name))
@@ -1669,8 +1639,6 @@ def apply_map_config(args, config, config_path):
     args.data_dir = data_dir
     args.map = map_path
     args.step_gain = DEFAULT_STEP_GAIN if args.step_gain is None else args.step_gain
-    if args.target_distance_px is None:
-        args.target_distance_px = TARGET_DISTANCE_PX
     if args.pf_erosion_radius_px is not None:
         PF_EROSION_RADIUS_PX = max(0, args.pf_erosion_radius_px)
 
@@ -1698,7 +1666,16 @@ def apply_map_config(args, config, config_path):
         f"曲がり角判定距離={ROUTE_CORNER_THRESHOLD_PX:.1f}px, "
         f"経路外重み={OFF_ROUTE_WEIGHT:.2f}"
     )
-    logging.info("総距離校正: " + ("無効" if args.target_distance_px is None else f"{args.target_distance_px:.1f}px"))
+    logging.info(
+        f"初期方位校正: {HEADING_CALIBRATION_MODE}"
+        + (f" (先頭{HEADING_CALIBRATION_STEPS}歩)" if HEADING_CALIBRATION_MODE == "walking" else "")
+    )
+    logging.info(
+        "歩幅校正ゲイン: " + (
+            f"{STEP_LENGTH_CALIBRATION_GAIN:.3f} (暫定値、次回計測の校正用データで再同定)"
+            if abs(STEP_LENGTH_CALIBRATION_GAIN - 1.0) > 1e-9 else "1.000 (校正なし)"
+        )
+    )
     logging.info(
         "不確実性適応粒子数: " + (
             f"有効 (neff比率<{UNCERTAINTY_NEFF_LOW_RATIO:.2f}で×{UNCERTAINTY_BOOST_FACTOR:.2f}, "
@@ -1737,7 +1714,9 @@ def load_map_config_for_tool(map_config_path):
     """
     fake_args = argparse.Namespace(
         data_dir=None, map=None, route_constraint_mode=None, route_source=None,
-        auto_route_dilation_px=None, target_distance_px=None, step_gain=None,
+        auto_route_dilation_px=None, step_gain=None,
+        step_length_calibration_gain=None,
+        heading_calibration_mode=None, heading_calibration_steps=None,
         pf_erosion_radius_px=None,
         auto_route_exclude_wide_rooms=None, auto_route_exclude_wide_rooms_radius_px=None,
         auto_route_centerline_enabled=None, auto_route_centerline_simplify_px=None,
@@ -1773,18 +1752,37 @@ def compute_step_acceleration(acc_mag: pd.Series):
     ).mean()
 
 
+# [本研究独自] 上限歩調(MAX_STEP_FREQUENCY_HZ)と実測サンプリング周波数から、
+# ステップ検出の最短ピーク間隔(サンプル数)を求める。サンプル数を直書きすると
+# 記録レートが変わったときに歩調の上限が意図せず変化するため、周波数側を固定して
+# こちらを毎回計算する。周波数が不明・不正な場合のみ従来の固定値へフォールバックする。
+def step_min_interval_samples(sampling_rate_hz):
+    """サンプリング周波数(Hz)からステップ検出の最短ピーク間隔(サンプル数)を返す。"""
+    if (
+        sampling_rate_hz is None
+        or not np.isfinite(sampling_rate_hz)
+        or sampling_rate_hz <= 0
+        or MAX_STEP_FREQUENCY_HZ <= 0
+    ):
+        return STEP_MIN_INTERVAL
+    return max(1, int(round(sampling_rate_hz / MAX_STEP_FREQUENCY_HZ)))
+
+
 # [SmartPDR] ピーク・谷・傾き条件を用いたステップ検出(原論文のステップ検出手法)。
-def detect_steps_smartpdr(step_acc: pd.Series):
+# [本研究独自] 最短ピーク間隔のみ、固定サンプル数から上限歩調ベースへ変更している
+# (2026-09-02。過検出の是正。step_min_interval_samples()のコメント参照)。
+def detect_steps_smartpdr(step_acc: pd.Series, sampling_rate_hz=None):
     values = step_acc.to_numpy()
+    min_interval = step_min_interval_samples(sampling_rate_hz)
     peaks, _ = find_peaks(
         values,
         height=SMART_PEAK_THR,
-        distance=STEP_MIN_INTERVAL,
+        distance=min_interval,
     )
 
     valid_peaks = []
     valley_indices = []
-    search_win = max(STEP_MIN_INTERVAL, 8)
+    search_win = max(min_interval, 8)
     for peak in peaks:
         left_start = max(0, peak - search_win)
         right_end = min(len(values), peak + search_win + 1)
@@ -1825,6 +1823,9 @@ def estimate_smartpdr_step_length_px(step_acc: pd.Series, peak_idx: int, valley_
         step_m = ROOT_BETA * (impact ** 0.25) + ROOT_GAMMA
     else:
         step_m = LOG_BETA * np.log(impact) + LOG_GAMMA
+    # [本研究独自] 被験者・端末の校正ゲインを、物理的な上下限クリップの前に適用する
+    # (2026-09-02。STEP_LENGTH_CALIBRATION_GAINのコメント参照)。
+    step_m *= STEP_LENGTH_CALIBRATION_GAIN
     step_m = np.clip(step_m, MIN_STEP_M, MAX_STEP_M)
     return step_m * M_TO_PIXEL
 
@@ -1908,17 +1909,49 @@ def nearest_route_segment_index(x, y):
     return best_index
 
 
-def estimate_initial_sensor_heading(df, source, sample_count):
-    """先頭の有限値から開始時センサ方位を円平均で求める。"""
-    if source == "android":
-        if "yaw_deg" not in df.columns:
-            raise ValueError("--heading-source android にはCSVのyaw_deg列が必要です。")
-        values = np.deg2rad(pd.to_numeric(df["yaw_deg"], errors="coerce").to_numpy())
-        values = values[np.isfinite(values)][:max(1, int(sample_count))]
-        if len(values) == 0:
-            raise ValueError("yaw_degに有効な値がありません。")
-        return weighted_angle_mean(values, np.ones(len(values)))
-    return None
+def estimate_initial_sensor_heading(df, source, sample_count, step_indices=None):
+    """開始時センサ方位(地図座標系へ合わせるための基準)を円平均で求める。
+
+    HEADING_CALIBRATION_MODE で2方式を切り替える。
+
+    "samples"(既定・従来方式): 記録の先頭sample_count個の有限値を円平均する。
+
+    "walking"([本研究独自]、2026-09-02追加): 検出済みステップの先頭
+    HEADING_CALIBRATION_STEPS歩の時点の方位を円平均する。従来方式は先頭
+    sample_count(既定30)サンプル=約0.57秒しか見ておらず、計測開始ボタンを押した
+    直後にまだ端末を持ち替えている・体の向きを変えている場合に基準方位が壊れる。
+    実際、pdr_log_0805_1438/1441では基準窓を30→250サンプルへ広げるだけで基準方位が
+    それぞれ-61度/-51度も動き、この窓が短すぎることが確認された(1442は-3度で安定)。
+    歩き始めてからの方位を使えば、静止中の持ち替えの影響を受けない。
+    なお、この方式は「開始時の歩行方向が--initial-heading-degである」という前提
+    (従来方式と同じ、利用者が計測時の事実として与える情報)だけを使っており、
+    正解経路や推定結果を参照していないので循環参照にはならない。
+    詳細はCHANGELOG.md 2026-09-02(4)項・memo/heading_calibration.md。
+    """
+    if source != "android":
+        # gyro方式の基準方位は、この関数の呼び出し時点ではまだ計算できない
+        # (Madgwick等の逐次計算がメインループ内で進むため)。従来通りNoneを返し、
+        # 呼び出し側が最初の有効行のraw_headingを基準として採用する。
+        return None
+    if "yaw_deg" not in df.columns:
+        raise ValueError("--heading-source android にはCSVのyaw_deg列が必要です。")
+    values = np.deg2rad(pd.to_numeric(df["yaw_deg"], errors="coerce").to_numpy())
+
+    if HEADING_CALIBRATION_MODE == "walking" and step_indices is not None and len(step_indices) > 0:
+        picked = np.asarray(step_indices)[:max(1, int(HEADING_CALIBRATION_STEPS))]
+        walking_values = values[picked]
+        walking_values = walking_values[np.isfinite(walking_values)]
+        if len(walking_values) > 0:
+            return weighted_angle_mean(walking_values, np.ones(len(walking_values)))
+        logging.warning(
+            "歩行開始基準の方位校正に有効なyaw_degがありませんでした。"
+            "先頭サンプル方式へフォールバックします。"
+        )
+
+    finite_values = values[np.isfinite(values)][:max(1, int(sample_count))]
+    if len(finite_values) == 0:
+        raise ValueError("yaw_degに有効な値がありません。")
+    return weighted_angle_mean(finite_values, np.ones(len(finite_values)))
 
 
 def correct_heading_with_route_segment(sensor_heading, route_segment_index):
@@ -1952,51 +1985,6 @@ def distance_to_route_corner(x, y, route_segment_index):
 def is_near_route_corner(x, y, route_segment_index):
     """PF推定位置が設定経路の曲がり角付近にあるか判定する。"""
     return distance_to_route_corner(x, y, route_segment_index) <= ROUTE_CORNER_THRESHOLD_PX
-
-
-def has_magnetometer(df):
-    return {'mag_x', 'mag_y', 'mag_z'}.issubset(df.columns)
-
-
-def get_mag_heading(row):
-    norm = max(np.sqrt(row.acc_x**2 + row.acc_y**2 + row.acc_z**2), 1e-6)
-    ax, ay, az = row.acc_x / norm, row.acc_y / norm, row.acc_z / norm
-    pitch = np.arctan2(ax, np.sqrt(ay**2 + az**2))
-    roll = np.arctan2(ay, np.sqrt(ax**2 + az**2))
-
-    mx = row.mag_x * np.cos(pitch) + row.mag_z * np.sin(pitch)
-    my = (
-        row.mag_x * np.sin(roll) * np.sin(pitch)
-        + row.mag_y * np.cos(roll)
-        - row.mag_z * np.sin(roll) * np.cos(pitch)
-    )
-    return normalize_angle(np.arctan2(-my, mx))
-
-
-def fuse_heading(prev_heading, mag_heading, gyro_heading, prev_mag_heading):
-    if mag_heading is None or prev_mag_heading is None:
-        return gyro_heading
-
-    h_cor = abs(angle_diff(mag_heading, gyro_heading))
-    h_mag = abs(angle_diff(mag_heading, prev_mag_heading))
-
-    if h_cor <= HCOR_THR and h_mag <= HMAG_THR:
-        return weighted_angle_mean(
-            np.array([prev_heading, mag_heading, gyro_heading]),
-            np.array([W_PREV, W_MAG, W_GYRO]),
-        )
-    if h_cor <= HCOR_THR and h_mag > HMAG_THR:
-        return weighted_angle_mean(
-            np.array([mag_heading, gyro_heading]),
-            np.array([W_MAG, W_GYRO]),
-        )
-    if h_cor > HCOR_THR and h_mag <= HMAG_THR:
-        return prev_heading
-
-    return weighted_angle_mean(
-        np.array([prev_heading, gyro_heading]),
-        np.array([W_PREV, W_GYRO]),
-    )
 
 
 def resample_if_needed(particles, weights):
@@ -2158,6 +2146,12 @@ def redraw_all_paths():
         file_path = Path(file_path_str)
         file_name = file_path.name
 
+        # [本研究独自] このCSV専用の乱数系列へ切り替える(file_random_seed参照)。
+        # 処理順・ファイル集合が変わっても各CSVの結果が変わらないようにするため。
+        file_seed = file_random_seed(args.seed, file_name)
+        if file_seed is not None:
+            np.random.seed(file_seed)
+
         file_start_x, file_start_y = get_or_select_start_position(
             file_name,
             binary,
@@ -2216,10 +2210,30 @@ def redraw_all_paths():
 
             df['acc_mag']    = compute_acc_magnitude(df)
             df['step_acc']   = compute_step_acceleration(df['acc_mag'])
-            step_indices, valley_indices = detect_steps_smartpdr(df['step_acc'])
+            # [本研究独自] ステップ検出の最短間隔を上限歩調から決めるため、CSVごとの
+            # 実測サンプリング周波数を求めて渡す(2026-09-02。過検出の是正)。
+            timestamp_diff_mean = df['timestamp'].diff().mean()
+            sampling_rate_hz = (
+                1.0 / timestamp_diff_mean
+                if pd.notna(timestamp_diff_mean) and timestamp_diff_mean > 0
+                else None
+            )
+            step_indices, valley_indices = detect_steps_smartpdr(
+                df['step_acc'], sampling_rate_hz
+            )
             valley_by_step = dict(zip(step_indices, valley_indices))
 
-            logging.info(f"[{file_name}] 総行数: {len(df)}  検出ステップ数: {len(step_indices)}")
+            duration_sec = float(df['timestamp'].iloc[-1] - df['timestamp'].iloc[0])
+            cadence_text = (
+                f", 歩調={len(step_indices) / duration_sec:.2f}歩/s"
+                if duration_sec > 0 else ""
+            )
+            logging.info(
+                f"[{file_name}] 総行数: {len(df)}  検出ステップ数: {len(step_indices)}"
+                + (f"  (サンプリング={sampling_rate_hz:.1f}Hz, 最短間隔="
+                   f"{step_min_interval_samples(sampling_rate_hz)}サンプル{cadence_text})"
+                   if sampling_rate_hz is not None else "")
+            )
 
             if len(step_indices) > 0:
                 raw_step_lengths = [
@@ -2227,19 +2241,13 @@ def redraw_all_paths():
                     for peak, valley in zip(step_indices, valley_indices)
                 ]
                 raw_total_dist = sum(raw_step_lengths)
-                step_scale = 1.0
-                if (not args.no_step_calibration and args.target_distance_px is not None and raw_total_dist > 0):
-                    step_scale = args.target_distance_px / raw_total_dist
-
-                step_lengths = [length * step_scale * args.step_gain for length in raw_step_lengths]
+                step_lengths = [length * args.step_gain for length in raw_step_lengths]
                 step_length_by_step = dict(zip(step_indices, step_lengths))
                 total_dist = sum(step_lengths)
                 logging.info(f"  SmartPDR歩幅推定 (px): 平均={np.mean(step_lengths):.1f}  "
                       f"≈ 平均{np.mean(step_lengths)/M_TO_PIXEL:.2f}m/歩")
-                target_text = "未指定" if args.target_distance_px is None else f"{args.target_distance_px:.0f}px"
                 logging.info(f"  推定総移動距離: {total_dist:.0f}px  "
-                      f"(校正前: {raw_total_dist:.0f}px, scale={step_scale:.2f}, "
-                      f"gain={args.step_gain:.2f}, 目標: {target_text})")
+                      f"(歩幅校正ゲイン適用後、step_gain={args.step_gain:.2f})")
             else:
                 logging.info("  ステップが検出されなかったため、このログは描画されません。")
                 continue
@@ -2268,11 +2276,9 @@ def redraw_all_paths():
 
             gyro_angle          = 0.0
             heading             = 0.0
-            prev_mag_heading    = None
             heading_history     = np.zeros(len(df))
             yaw_rate_history    = np.zeros(len(df))
             step_set            = set(step_indices)
-            mag_enabled         = has_magnetometer(df)
             current_behavior    = MoveBehavior.STRAIGHT
             behavior_history    = []
             particle_count_history = []
@@ -2296,6 +2302,7 @@ def redraw_all_paths():
                     df,
                     args.heading_source,
                     args.heading_calibration_samples,
+                    step_indices,
                 )
             except ValueError as e:
                 logging.warning(f"[{file_name}] 処理をスキップしました: {e}")
@@ -2345,15 +2352,7 @@ def redraw_all_paths():
                             row['acc_y'],
                             row['acc_z']
                         ])
-                        if mag_enabled:
-                            mag = np.array([
-                                row['mag_x'],
-                                row['mag_y'],
-                                row['mag_z']
-                            ])
-                            Q[i] = madgwick.updateMARG(q=Q[i - 1], gyr=gyro, acc=acc, mag=mag)
-                        else:
-                            Q[i] = madgwick.updateIMU(q=Q[i - 1], gyr=gyro, acc=acc)
+                        Q[i] = madgwick.updateIMU(q=Q[i - 1], gyr=gyro, acc=acc)
 
                         rot = R.from_quat([Q[i][1], Q[i][2], Q[i][3], Q[i][0]])
                         gyro_angle = normalize_angle(rot.as_euler('xyz')[2])
@@ -2364,10 +2363,7 @@ def redraw_all_paths():
                 else:
                     gyro_angle = normalize_angle(gyro_angle * ANGLE_DECAY + yaw_rate * dt)
 
-                mag_heading = get_mag_heading(row) if mag_enabled else None
-                fused_heading = normalize_angle(
-                    fuse_heading(heading, mag_heading, gyro_angle, prev_mag_heading)
-                )
+                fused_heading = gyro_angle
 
                 if args.heading_source == "android":
                     yaw_value = pd.to_numeric(row.get("yaw_deg", np.nan), errors="coerce")
@@ -2387,8 +2383,6 @@ def redraw_all_paths():
                 )
                 heading_history[i] = heading
                 yaw_rate_history[i] = yaw_rate
-                if mag_heading is not None:
-                    prev_mag_heading = mag_heading
 
                 if i not in step_set:
                     continue
@@ -2577,7 +2571,17 @@ def redraw_all_paths():
                         len(estimated_positions),
                     )
                 else:
-                    traj_path = (RESULTS_DIR / f"{Path(file_name).stem}_trajectory.csv").resolve()
+                    # 実行条件をファイル名に含める(2026-09-02)。従来は
+                    # "{CSV名}_trajectory.csv"固定で、条件やシードを変えて実行すると
+                    # 黙って上書きされ、条件間の比較ができなかった。
+                    seed_text = "none" if args.seed is None else str(args.seed)
+                    traj_name = (
+                        f"{Path(file_name).stem}_traj"
+                        f"_{ROUTE_CONSTRAINT_MODE}-{ROUTE_SOURCE}"
+                        f"_{args.heading_source}-{HEADING_CALIBRATION_MODE}"
+                        f"_seed-{seed_text}.csv"
+                    )
+                    traj_path = (RESULTS_DIR / traj_name).resolve()
                     traj_path.parent.mkdir(parents=True, exist_ok=True)
                     pd.DataFrame({
                         "timestamp": step_timestamps,
@@ -2615,7 +2619,13 @@ def redraw_all_paths():
     else:
         timestamp = time.strftime("%Y%m%d_%H%M%S")
         seed_text = "none" if args.seed is None else str(args.seed)
-        auto_name = f"{timestamp}_route-{ROUTE_CONSTRAINT_MODE}-{ROUTE_SOURCE}{unc_tag}_seed-{seed_text}.png"
+        # 方位源と初期方位校正方式もファイル名へ含める(2026-09-02追加)。これらを
+        # 変えた実行が同名パターンになり、掃引結果のPNGを後から区別できなかったため。
+        heading_tag = f"{args.heading_source}-{HEADING_CALIBRATION_MODE}"
+        auto_name = (
+            f"{timestamp}_route-{ROUTE_CONSTRAINT_MODE}-{ROUTE_SOURCE}{unc_tag}"
+            f"_head-{heading_tag}_seed-{seed_text}.png"
+        )
         save_path = (RESULTS_DIR / auto_name).resolve()
     save_path.parent.mkdir(parents=True, exist_ok=True)
     fig.set_size_inches(10, 8, forward=True)
