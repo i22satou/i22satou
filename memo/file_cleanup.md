@@ -6,6 +6,31 @@
 
 ---
 
+### 2026-09-03: results/のPNGを代表5枚だけ残して整理(ユーザー依頼)
+
+`pdr_program/results/`のPNGが123枚まで増えていたため、代表5枚を残し118枚を
+`削除候補/results/`へ移動した(**削除はしていない**)。CSV17件は数値そのものの記録なので
+全て`results/`に残した。
+
+残した5枚と理由:
+
+| ファイル | 理由 |
+|---|---|
+| `kanri_4f_route_graph_check.png` / `_simplified.png` | `verify_route_graph.py`が出力する通路グラフの検証図。タイムスタンプ無しで上書き更新される。卒論の図候補 |
+| `20260902_221353_route-enforce-auto+unc_head-android-walking_seed-42.png` | 上流是正(2026-09-02)後の主提案条件。`results/`内の軌跡CSV3件と対応する |
+| `20260903_131331_route-none-manual+unc_head-gyro-samples_seed-42.png` | 分岐仮説の選別尤度を実装する**前**の既定動作 |
+| `20260903_144756_route-none-manual+unc_head-gyro-samples_seed-42.png` | 実装**後**の既定動作。1442でx=484.6, y=259.9と一致し、既定が変わっていないことの証拠 |
+
+移動した118枚の大半は`sensitivity_branch_likelihood.py`のσスイープ出力で、
+PNGのファイル名にσも対象CSVも入らない(命名がroute_source/route_constraint_mode/
+heading/seedのみに基づく)ため1枚単位では識別できず、個々に価値がない。
+数値は`results/20260903_*_branch_likelihood_sensitivity.csv`3件に残っている。
+移動前に`memo/`・`CLAUDE.md`・`CLAUDE_MEMO.txt`・`CHANGELOG.md`・`進捗反映版メモ.txt`から
+PNGファイル名で参照されているものを機械的に洗い出して照合済み(上記の訂正1件を実施)。
+
+**PNGは実行のたびに増え続ける**(CLAUDE.mdの「実行ごとに結果PNGを必ず保存する」方針のため)。
+比較実験やスイープを回した後は同じ要領で整理すること。
+
 ### 2026-08-16: プログラム一式を`pdr_program/`へ集約 + 累積した検証用PNG/CSVを削除候補へ移動
 
 **ファイル整理**: `Trajectory.py`(初期の単純デッドレコニング試作、PF無し・磁気センサ
@@ -51,8 +76,10 @@ seedのみに基づき、感度分析用の追加CLI引数を反映しないた�
 生データCSV(`results/20260816_110418_uncertainty_sensitivity.csv`)と
 [uncertainty_particles.md](uncertainty_particles.md)の集計表に残っており、
 個々のPNGに一意の価値はないため全て移動対象とした。代表画像が必要な場合は
-2026-08-15時点の`results/20260815_230748_route-enforce-auto+unc_seed-42.png`
-(auto-enforce-unc条件、seed=42)が既存の参照可能な1枚として`results/`に残っている。
+2026-08-15時点の`20260815_230748_route-enforce-auto+unc_seed-42.png`
+(auto-enforce-unc条件、seed=42)を参照していたが、**2026-09-03の整理で`削除候補/results/`へ
+移動した**。そもそもこれは`target_distance_px`が有効だった時期の実行で現行結果と直接
+比較できないため、代表画像としては下記2026-09-03の項で残した5枚を使うこと。
 
 ### 結論・現状
 

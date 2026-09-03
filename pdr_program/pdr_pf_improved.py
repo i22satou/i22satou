@@ -282,6 +282,18 @@ MULTI_HYPOTHESIS_ROUTING_SIMPLIFY_PX = 10.0
 # 正しい検証により、方位重み付け(σ=10〜60)が一様乱択を明確に上回らないと判明した
 # ため、既定を一様乱択相当に戻した(詳細はCHANGELOG.md 2026-08-30(4)項)。
 MULTI_HYPOTHESIS_BRANCH_HEADING_SIGMA_DEG = 100000.0
+# [本研究独自] 分岐仮説の選別尤度の広がり(度)。Noneまたは0以下で無効(既定)。
+# 交差点で分岐したあと、粒子が乗っている通路区間の方位と、その歩で観測された
+# センサー方位との一致度を、独立した観測尤度として重みに掛ける。
+# 【上のBRANCH_HEADING_SIGMA_DEGとの違い】あちらは「どのエッジへ分岐させるか」という
+# 提案分布を偏らせるもので、重みで補正していない。ブートストラップPFでは提案分布を
+# 偏らせても重みで補正しなければ推定は改善しないため、2026-08-30の検証で一様乱択を
+# 上回らなかった。こちらは分岐後の状態を観測で評価する尤度なので、提案分布が一様
+# (既定のσ=100000)であれば二重計上にならない。
+# 【併用禁止】BRANCH_HEADING_SIGMA_DEGを有限値にしたうえでこちらも有効にすると、
+# 提案分布の偏りを重みでもう一度掛けることになり二重計上になる(2026-09-02に削除した
+# 方位ズレの重みと同じ誤り)。両方を有限値にした場合は警告を出す。
+MULTI_HYPOTHESIS_BRANCH_LIKELIHOOD_SIGMA_DEG = None
 GYRO_UNIT = "rad"
 # 別の図(L字経路用など)で使用しており、このJSONの実行対象からは除外したいCSVファイル名。
 # map_configs/*.jsonの"exclude_csv"(任意設定)から読み込む。ファイル名の完全一致で判定する。
@@ -750,6 +762,9 @@ class ParticleFilterPDR:
         self.estimated_positions = []
         self.extinction_count = 0
         self.route_ratio_history = []
+        # [本研究独自] 分岐仮説の選別尤度における、区間方位とセンサー方位の
+        # 平均ずれ(度)。尤度が実際に効いているかを確認するための診断値。
+        self.branch_likelihood_gap_history = []
         self.valid_ratio_history = []
         self.neff_history = []
         self.position_spread_history = []
@@ -866,15 +881,12 @@ class ParticleFilterPDR:
             "forward" if direction > 0 else "backward",
         )
 
-    def _route_corrected_headings(self, sensor_step_heading):
-        """粒子ごとの現在エッジ・区間の方位とセンサー方位を重み付き融合する
-        (correct_heading_with_route_segment()の粒子版)。エッジをまたいで
-        ループするのではなく、エッジ単位でまとめてブロードキャスト計算する
-        (エッジ数は粒子数よりずっと少ないため)。
+    def _particle_route_headings(self):
+        """粒子ごとに、いま乗っている通路区間の方位(rad)を返す。
+        エッジをまたいでループするのではなく、エッジ単位でまとめてブロードキャスト
+        計算する(エッジ数は粒子数よりずっと少ないため)。
+        方位補正(_route_corrected_headings)と分岐仮説の選別尤度の両方から使う。
         """
-        if ROUTE_HEADING_WEIGHT <= 0:
-            return np.full(self.n_particles, sensor_step_heading)
-
         edge_ids = self.particles[:, 2].astype(int)
         seg_indices = self.particles[:, 3].astype(int)
         directions = self.particles[:, 4]
@@ -894,7 +906,16 @@ class ParticleFilterPDR:
             h = seg_headings[physical_idx]
             h = np.where(dir_mask > 0, h, h + np.pi)
             route_headings[mask] = h
+        return route_headings
 
+    def _route_corrected_headings(self, sensor_step_heading):
+        """粒子ごとの区間方位とセンサー方位を重み付き融合する
+        (correct_heading_with_route_segment()の粒子版)。
+        """
+        if ROUTE_HEADING_WEIGHT <= 0:
+            return np.full(self.n_particles, sensor_step_heading)
+
+        route_headings = self._particle_route_headings()
         sin_sum = np.sin(sensor_step_heading) + np.sin(route_headings) * ROUTE_HEADING_WEIGHT
         cos_sum = np.cos(sensor_step_heading) + np.cos(route_headings) * ROUTE_HEADING_WEIGHT
         return np.arctan2(sin_sum, cos_sum)
@@ -908,8 +929,12 @@ class ParticleFilterPDR:
         乱択(choose_branch_by_heading、pdr_route_graph.py、2026-08-30)。
         来た道をそのまま戻る選択肢は、他に行き先がある限り除外する(行き止まり
         =端点ノードでは選択肢が無いので、そのまま引き返す)。
-        分岐後にどの仮説が正しいかは、この後の通常の重み付け・リサンプリング
-        (壁尤度・経路帯マスク・方位整合度)で自然に選別される。
+        分岐後にどの仮説が正しいかは、この後の重み付け・リサンプリングで選別する。
+        ただし壁尤度と経路帯マスクは、分岐先がどちらも通路であれば仮説を区別
+        できない。そのための選別尤度が
+        MULTI_HYPOTHESIS_BRANCH_LIKELIHOOD_SIGMA_DEG(2026-09-03、既定は無効)。
+        なお、ここでいう「方位整合度」による選別は2026-09-02(3)項で削除済みで、
+        2026-09-02以前のこのdocstringの記述は誤りだった。
         """
         edge_ids = self.particles[:, 2].astype(int)
         seg_indices = self.particles[:, 3].astype(int)
@@ -1061,6 +1086,27 @@ class ParticleFilterPDR:
         elif ROUTE_CONSTRAINT_MODE == "prefer":
             weights *= np.where(on_route, 1.0, self.params['off_route_weight'])
         # noneでは経路重みを適用しない。
+
+        # [本研究独自] 分岐仮説の選別尤度(2026-09-03)。
+        # 交差点で分岐した粒子は、壁尤度でも経路帯マスクでも区別できない
+        # (分岐先がどちらも通路なら、どちらの仮説も同じ重みになる)。そこで、
+        # 粒子が乗っている通路区間の方位と、その歩で観測されたセンサー方位との
+        # 一致度を独立した観測尤度として掛け、正しい分岐を選別する。
+        # 【重要】比較対象はstep_heading(生のセンサー方位)であって、
+        # corrected_step_heading(区間方位を混ぜた補正後の方位)でもp_angle
+        # (粒子ごとにノイズを乗せた提案サンプル)でもない。前者は区間方位から
+        # 作られているので循環し、後者は提案分布の密度でそのサンプル自身を
+        # 重み付ける二重計上になる(2026-09-02(3)項で削除した誤りと同じ)。
+        branch_sigma_deg = MULTI_HYPOTHESIS_BRANCH_LIKELIHOOD_SIGMA_DEG
+        if (self.route_topology is not None
+                and branch_sigma_deg is not None and branch_sigma_deg > 0):
+            branch_sigma = np.radians(branch_sigma_deg)
+            seg_headings_p = self._particle_route_headings()
+            heading_gap = angle_diff(seg_headings_p, step_heading)
+            weights *= np.exp(-(heading_gap ** 2) / (2 * branch_sigma ** 2))
+            self.branch_likelihood_gap_history.append(
+                float(np.mean(np.abs(np.degrees(heading_gap))))
+            )
 
         # 比較・考察用のPF診断値。noneではroute_maskが全Trueになる。
         valid_particles = ~hit_wall
@@ -1300,6 +1346,18 @@ def parse_args():
         ),
     )
     parser.add_argument(
+        "--multi-hypothesis-branch-likelihood-sigma-deg",
+        type=float,
+        default=None,
+        help=(
+            "[本研究独自] 分岐仮説の選別尤度の広がり(度)。粒子が乗っている通路区間の"
+            "方位と、その歩の実測センサー方位との一致度を観測尤度として重みに掛け、"
+            "交差点で分かれた仮説を選別する。0以下または無指定で無効(既定)。"
+            "--multi-hypothesis-branch-heading-sigma-degを有限値にしたまま併用すると"
+            "提案分布の偏りを重みで二重に掛けることになるので併用しないこと。"
+        ),
+    )
+    parser.add_argument(
         "--multi-hypothesis-routing",
         dest="multi_hypothesis_routing_enabled",
         action="store_true",
@@ -1463,6 +1521,7 @@ def apply_map_config(args, config, config_path):
     global AUTO_ROUTE_CENTERLINE_ENABLED, AUTO_ROUTE_CENTERLINE_SIMPLIFY_PX
     global MULTI_HYPOTHESIS_ROUTING_ENABLED, MULTI_HYPOTHESIS_ROUTING_SIMPLIFY_PX
     global MULTI_HYPOTHESIS_BRANCH_HEADING_SIGMA_DEG
+    global MULTI_HYPOTHESIS_BRANCH_LIKELIHOOD_SIGMA_DEG
     global N_PARTICLES_STRAIGHT, N_PARTICLES_TURNING, N_PARTICLES_STOPPED
     global SIGMA_STEP_STRAIGHT, SIGMA_STEP_TURNING, SIGMA_STEP_STOPPED
     global SIGMA_ANGLE_STRAIGHT, SIGMA_ANGLE_TURNING, SIGMA_ANGLE_STOPPED
@@ -1577,6 +1636,28 @@ def apply_map_config(args, config, config_path):
         if args.multi_hypothesis_branch_heading_sigma_deg is not None
         else float(config.get("multi_hypothesis_branch_heading_sigma_deg", 100000.0))
     )
+    # [本研究独自] 分岐仮説の選別尤度(2026-09-03)。無指定・0以下で無効。
+    branch_likelihood_raw = (
+        args.multi_hypothesis_branch_likelihood_sigma_deg
+        if args.multi_hypothesis_branch_likelihood_sigma_deg is not None
+        else config.get("multi_hypothesis_branch_likelihood_sigma_deg", None)
+    )
+    MULTI_HYPOTHESIS_BRANCH_LIKELIHOOD_SIGMA_DEG = (
+        float(branch_likelihood_raw)
+        if branch_likelihood_raw is not None and float(branch_likelihood_raw) > 0
+        else None
+    )
+    if (MULTI_HYPOTHESIS_BRANCH_LIKELIHOOD_SIGMA_DEG is not None
+            and MULTI_HYPOTHESIS_BRANCH_HEADING_SIGMA_DEG < 1000.0):
+        logging.warning(
+            "分岐仮説の選別尤度(σ=%.1f度)と、分岐の提案分布の方位重み付け(σ=%.1f度)を"
+            "同時に有効にしている。提案分布の偏りを重みでもう一度掛けることになり"
+            "二重計上になる。選別尤度を使うときは"
+            "--multi-hypothesis-branch-heading-sigma-degを既定(100000=一様乱択)の"
+            "ままにすること。",
+            MULTI_HYPOTHESIS_BRANCH_LIKELIHOOD_SIGMA_DEG,
+            MULTI_HYPOTHESIS_BRANCH_HEADING_SIGMA_DEG,
+        )
     GYRO_UNIT = str(require_config_value(config, "gyro_unit", config_name)).lower()
     if GYRO_UNIT not in {"rad", "deg"}:
         raise ValueError("gyro_unit は 'rad' または 'deg' を指定してください。")
@@ -1726,6 +1807,7 @@ def load_map_config_for_tool(map_config_path):
         uncertainty_shrink_factor=None,
         multi_hypothesis_routing_enabled=None, multi_hypothesis_routing_simplify_px=None,
         multi_hypothesis_branch_heading_sigma_deg=None,
+        multi_hypothesis_branch_likelihood_sigma_deg=None,
     )
     map_config, resolved_config_path = load_map_config(map_config_path)
     apply_map_config(fake_args, map_config, resolved_config_path)
@@ -2177,6 +2259,10 @@ def redraw_all_paths():
             tuple(ROUTE_POINTS),
             float(ROUTE_HEADING_WEIGHT),
             float(OFF_ROUTE_WEIGHT),
+            # 2026-09-03: 分岐仮説の選別尤度と初期方位の校正方式もキャッシュ判定に含める。
+            # 含めないと、監視中にこれらだけを変えたときに古い結果が返る。
+            MULTI_HYPOTHESIS_BRANCH_LIKELIHOOD_SIGMA_DEG,
+            HEADING_CALIBRATION_MODE,
         )
 
         # キャッシュの取得判定
@@ -2532,6 +2618,12 @@ def redraw_all_paths():
                     np.mean(pf.route_ratio_history),
                     np.mean(pf.neff_history),
                     np.mean(pf.position_spread_history),
+                )
+            if pf.branch_likelihood_gap_history:
+                logging.info(
+                    "  分岐仮説の選別尤度: σ=%.1f度, 区間方位とセンサー方位の平均ずれ=%.1f度",
+                    MULTI_HYPOTHESIS_BRANCH_LIKELIHOOD_SIGMA_DEG,
+                    np.mean(pf.branch_likelihood_gap_history),
                 )
             if UNCERTAINTY_ADAPTIVE_PARTICLES:
                 logging.info(
