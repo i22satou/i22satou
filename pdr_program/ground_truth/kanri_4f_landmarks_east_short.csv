@@ -1,0 +1,13 @@
+seq,label,point_type,x_px,y_px
+1,west_end_wall,end,32.0,230.0
+2,ie3_ie4,wall,128.0,230.0
+3,rm101_rm103,wall,231.0,230.0
+4,door_rm103,door,260.0,230.0
+5,door_ie5,door,350.0,230.0
+6,hall_enter,corner,386.0,230.0
+7,corridor2_enter,corner,412.0,131.0
+8,server_dev,wall,489.0,115.0
+9,door_ee_lab,door,520.0,115.0
+10,door_dev,door,650.0,115.0
+11,dev_support,wall,696.0,115.0
+12,support_hw,wall,748.0,115.0

@@ -22,6 +22,7 @@ route_source=autoの検証中に見つかった1441/1442の謎)は、両方の�
 | [memo/step_length_calibration.md](memo/step_length_calibration.md) | ステップ検出の過検出(第2高調波)・歩幅の過小推定と校正ゲイン。**sensor_mysteryの1441/1442問題の答え** |
 | [memo/sensor_mystery.md](memo/sensor_mystery.md) | 1441/1442の性能差(**2026-09-02解決**)。棄却した仮説一覧と「上流を先に疑う」教訓 |
 | [memo/branch_likelihood.md](memo/branch_likelihood.md) | 分岐仮説の選別尤度(複数経路仮説PFの重み側)の実装と6シード検証。**提案分布を偏らせた2026-08-30の試みが効かなかった理由もここ** |
+| [memo/ground_truth.md](memo/ground_truth.md) | 正解位置データ(RMSE用)の目印設計と現地採寸。**pick_landmarks.pyを使わない理由**・平面図が二値地図と同一座標系で使えること・平面図にドアが無いことの確認・マスター表+経路定義方式・縮尺検証の設計 |
 | [memo/file_cleanup.md](memo/file_cleanup.md) | 不要ファイルの「削除候補」フォルダへの移動(2026-08-15) |
 | [memo/pipeline_fixes.md](memo/pipeline_fixes.md) | pdr_pf_improved.py本体の初期バグ修正(route_points座標修正、prefer/enforceの挙動修正、未使用コード削除、pdr_pf_clickstart.pyとの差分解消) |
 | [memo/android_app.md](memo/android_app.md) | PDR計測アプリ(Android)のCSVフォーマット拡張・コードレビュー |

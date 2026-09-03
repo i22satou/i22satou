@@ -1,0 +1,14 @@
+seq,label,point_type,x_px,y_px
+1,west_end_wall,end,32.0,230.0
+2,stair_hall_edge,corner,76.0,230.0
+3,ie3_ie4,wall,128.0,230.0
+4,rm101_rm103,wall,231.0,230.0
+5,hall_enter,corner,386.0,230.0
+6,corridor2_enter,corner,412.0,131.0
+7,stair_west,wall,438.0,115.0
+8,server_dev,wall,489.0,115.0
+9,dev_support,wall,696.0,115.0
+10,support_hw,wall,748.0,115.0
+11,hw_design,wall,852.0,115.0
+12,design_machine,wall,903.0,115.0
+13,east_end_wall,end,949.0,115.0
