@@ -38,8 +38,9 @@
 # - 複数のCSVで開始方向が異なる場合は、開始方向ごとに分けて実行する。
 #
 # 【方位推定方法】
-# - --heading-source gyroを指定した場合は、ジャイロ、加速度、
-#   Madgwickフィルタ、利用可能な場合は磁気センサを用いて方位を推定する。
+# - --heading-source gyroを指定した場合は、ジャイロと加速度を用いた
+#   Madgwickフィルタ(updateIMU)で方位を推定する。磁気センサによる融合は
+#   2026-09-02に削除した(全CSVにmag列が無く、コードが動いていなかったため)。
 # - --heading-source androidを指定した場合は、
 #   AndroidのTYPE_ROTATION_VECTORから記録したyaw_degを使用する。
 # - android方式を使用する場合は、入力CSVにyaw_deg列が必要である。

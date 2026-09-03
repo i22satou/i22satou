@@ -129,6 +129,12 @@ REFERENCES_PLACEHOLDER = (
 CHAPTER_RE = re.compile(r"^第(\d+)章(?:[\s　]+(.*))?$")
 SECTION_RE = re.compile(r"^(\d+)\.(\d+)[\s　]+(.+)$")
 SEP_RE = re.compile(r"^-{10,}$")
+MATH_FENCE = "$$"
+
+# CHAPTERSに実在する節番号だけを見出しとして扱う。本文には数式(TeX)が含まれ、
+# 「0.75 & (r > ...)」のように数字.数字で始まる行が現れる。これを見出しと誤認すると、
+# その行以降の本文が丸ごと存在しない節へ吸い込まれて出力から消える(2026-09-03に発生)。
+VALID_SECTION_IDS = {sec_id for _, _, secs in CHAPTERS for sec_id, _, _ in secs}
 
 
 def parse_memo(text: str):
@@ -139,6 +145,7 @@ def parse_memo(text: str):
     current_chapter = None
     buf = []
     started = False
+    in_math = False
 
     def flush():
         nonlocal buf
@@ -158,6 +165,14 @@ def parse_memo(text: str):
             if SEP_RE.match(s):
                 started = True
             continue
+        # $$ だけの行で開閉する数式ブロックの中は、見出しの判定を一切行わない。
+        if s == MATH_FENCE:
+            in_math = not in_math
+            buf.append(line)
+            continue
+        if in_math:
+            buf.append(line)
+            continue
         if SEP_RE.match(s):
             flush()
             current_id = None
@@ -170,7 +185,7 @@ def parse_memo(text: str):
             current_id = None
             continue
         m_sec = SECTION_RE.match(s)
-        if m_sec:
+        if m_sec and f"{m_sec.group(1)}.{m_sec.group(2)}" in VALID_SECTION_IDS:
             flush()
             current_id = f"{m_sec.group(1)}.{m_sec.group(2)}"
             continue
@@ -252,6 +267,10 @@ def main():
             check=True,
             capture_output=True,
             text=True,
+            # 本文中の図は ../figures/*.png と相対指定してある。pandocは相対パスを
+            # 実行時のカレントディレクトリ基準で解決するため、常にこのファイルの
+            # あるディレクトリ(卒論/)を基準にして画像を取りこぼさないようにする。
+            cwd=str(HERE),
         )
     except FileNotFoundError:
         print("警告: pandocが見つからないため.docxは生成していません(.mdのみ更新)", file=sys.stderr)

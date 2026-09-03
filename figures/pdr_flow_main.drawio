@@ -1,147 +1,68 @@
 <mxfile host="app.diagrams.net" agent="claude-code" version="24.0.0">
   <diagram id="pdr-main-flow" name="メインフロー">
-    <mxGraphModel dx="800" dy="600" grid="0" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="850" pageHeight="980" math="0" shadow="0">
+    <mxGraphModel dx="900" dy="700" grid="0" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1070" pageHeight="1150" math="0" shadow="0">
       <root>
         <mxCell id="0" />
         <mxCell id="1" parent="0" />
-<mxCell id="n1" value="JSON設定" style="shape=parallelogram;whiteSpace=wrap;html=1;fillColor=#F0F1F3;strokeColor=#6B7280;fontSize=12;perimeter=parallelogramPerimeter;arcSize=12;" vertex="1" parent="1">
-  <mxGeometry x="50" y="40" width="180" height="45" as="geometry" />
-</mxCell>
-<mxCell id="n1b" value="設定読み込み・適用&lt;br&gt;(必須値欠落はエラー)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FBE4C4;strokeColor=#B5651D;fontSize=12;arcSize=10;" vertex="1" parent="1">
-  <mxGeometry x="50" y="115" width="180" height="45" as="geometry" />
-</mxCell>
-<mxCell id="n2" value="地図画像" style="shape=parallelogram;whiteSpace=wrap;html=1;fillColor=#F0F1F3;strokeColor=#6B7280;fontSize=12;perimeter=parallelogramPerimeter;arcSize=12;" vertex="1" parent="1">
-  <mxGeometry x="430" y="40" width="180" height="45" as="geometry" />
-</mxCell>
-<mxCell id="n2b" value="2値化・壁抽出" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FBE4C4;strokeColor=#B5651D;fontSize=12;arcSize=10;" vertex="1" parent="1">
-  <mxGeometry x="430" y="115" width="180" height="45" as="geometry" />
-</mxCell>
-<mxCell id="n3" value="地図制約情報&lt;br&gt;(壁距離場)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F0F1F3;strokeColor=#6B7280;fontSize=12;arcSize=10;" vertex="1" parent="1">
-  <mxGeometry x="240" y="195" width="180" height="50" as="geometry" />
-</mxCell>
-<mxCell id="n4" value="加速度3軸" style="shape=parallelogram;whiteSpace=wrap;html=1;fillColor=#F0F1F3;strokeColor=#6B7280;fontSize=12;perimeter=parallelogramPerimeter;arcSize=12;" vertex="1" parent="1">
-  <mxGeometry x="50" y="300" width="180" height="42" as="geometry" />
-</mxCell>
-<mxCell id="n5" value="歩行検出・歩幅推定" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#DCE6F5;strokeColor=#3B6DA8;fontSize=12;arcSize=10;" vertex="1" parent="1">
-  <mxGeometry x="50" y="365" width="180" height="48" as="geometry" />
-</mxCell>
-<mxCell id="n5b" value="総移動距離を校正" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FBE4C4;strokeColor=#B5651D;fontSize=12;arcSize=10;" vertex="1" parent="1">
-  <mxGeometry x="250" y="365" width="170" height="48" as="geometry" />
-</mxCell>
-<mxCell id="n6" value="ジャイロ角速度" style="shape=parallelogram;whiteSpace=wrap;html=1;fillColor=#F0F1F3;strokeColor=#6B7280;fontSize=12;perimeter=parallelogramPerimeter;arcSize=12;" vertex="1" parent="1">
-  <mxGeometry x="430" y="300" width="180" height="42" as="geometry" />
-</mxCell>
-<mxCell id="n7" value="方位推定&lt;br&gt;(Madgwick)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#DCE6F5;strokeColor=#3B6DA8;fontSize=12;arcSize=10;" vertex="1" parent="1">
-  <mxGeometry x="430" y="365" width="180" height="45" as="geometry" />
-</mxCell>
-<mxCell id="n7b" value="Android yaw_deg&lt;br&gt;も選択可" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FBE4C4;strokeColor=#B5651D;fontSize=12;arcSize=10;" vertex="1" parent="1">
-  <mxGeometry x="650" y="365" width="180" height="45" as="geometry" />
-</mxCell>
-<mxCell id="n8" value="移動様態判定&lt;br&gt;(直進/屈折/滞留)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#DCE6F5;strokeColor=#3B6DA8;fontSize=12;arcSize=10;" vertex="1" parent="1">
-  <mxGeometry x="430" y="435" width="180" height="50" as="geometry" />
-</mxCell>
-<mxCell id="n8b" value="屈折判定を安定化&lt;br&gt;(75%ile+ヒステリシス)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FBE4C4;strokeColor=#B5651D;fontSize=12;arcSize=10;" vertex="1" parent="1">
-  <mxGeometry x="650" y="435" width="180" height="50" as="geometry" />
-</mxCell>
-<mxCell id="n9a" value="経路線分切替判定" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FBE4C4;strokeColor=#B5651D;fontSize=12;arcSize=10;" vertex="1" parent="1">
-  <mxGeometry x="430" y="510" width="180" height="45" as="geometry" />
-</mxCell>
-<mxCell id="n9" value="経路方位補正" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FBE4C4;strokeColor=#B5651D;fontSize=12;arcSize=10;" vertex="1" parent="1">
-  <mxGeometry x="430" y="580" width="180" height="45" as="geometry" />
-</mxCell>
-<mxCell id="n10" value="歩幅・方位&lt;br&gt;(補正後)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F0F1F3;strokeColor=#6B7280;fontSize=12;arcSize=10;" vertex="1" parent="1">
-  <mxGeometry x="240" y="660" width="180" height="50" as="geometry" />
-</mxCell>
-<mxCell id="n11" value="適応型パーティクルフィルタ(PF)&lt;br&gt;による位置推定&lt;br&gt;(詳細は図2)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#EEF0F4;strokeColor=#37474F;fontSize=13;fontStyle=1;arcSize=10;strokeWidth=1.6;" vertex="1" parent="1">
-  <mxGeometry x="190" y="800" width="280" height="65" as="geometry" />
-</mxCell>
-<mxCell id="n12" value="現在位置・軌跡を&lt;br&gt;地図上へ表示" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F0F1F3;strokeColor=#6B7280;fontSize=12;arcSize=10;" vertex="1" parent="1">
-  <mxGeometry x="200" y="900" width="260" height="50" as="geometry" />
-</mxCell>
-<mxCell id="leg_b" value="" style="rounded=1;fillColor=#DCE6F5;strokeColor=#3B6DA8;" vertex="1" parent="1"><mxGeometry x="650" y="40" width="18" height="18" as="geometry"/></mxCell>
-<mxCell id="leg_o" value="" style="rounded=1;fillColor=#FBE4C4;strokeColor=#B5651D;" vertex="1" parent="1"><mxGeometry x="650" y="66" width="18" height="18" as="geometry"/></mxCell>
-<mxCell id="leg_g" value="" style="rounded=1;fillColor=#F0F1F3;strokeColor=#6B7280;" vertex="1" parent="1"><mxGeometry x="650" y="92" width="18" height="18" as="geometry"/></mxCell>
-<mxCell id="e1" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeColor=#37474F;strokeWidth=1.3;jettySize=auto;orthogonalLoop=1;exitX=0.5;exitY=1;entryX=0.5;entryY=0;" edge="1" parent="1" source="n1" target="n1b">
-  <mxGeometry relative="1" as="geometry"></mxGeometry>
-</mxCell>
-<mxCell id="e2" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeColor=#37474F;strokeWidth=1.3;jettySize=auto;orthogonalLoop=1;exitX=0.5;exitY=1;entryX=0.5;entryY=0;" edge="1" parent="1" source="n2" target="n2b">
-  <mxGeometry relative="1" as="geometry"></mxGeometry>
-</mxCell>
-<mxCell id="e3" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeColor=#37474F;strokeWidth=1.3;jettySize=auto;orthogonalLoop=1;exitX=0.5;exitY=1;entryX=0.3;entryY=0;" edge="1" parent="1" source="n1b" target="n3">
-  <mxGeometry relative="1" as="geometry"></mxGeometry>
-</mxCell>
-<mxCell id="e4" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeColor=#37474F;strokeWidth=1.3;jettySize=auto;orthogonalLoop=1;exitX=0.5;exitY=1;entryX=0.7;entryY=0;" edge="1" parent="1" source="n2b" target="n3">
-  <mxGeometry relative="1" as="geometry"></mxGeometry>
-</mxCell>
-<mxCell id="e5" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeColor=#37474F;strokeWidth=1.3;jettySize=auto;orthogonalLoop=1;exitX=0.5;exitY=1;entryX=0.5;entryY=0;" edge="1" parent="1" source="n4" target="n5">
-  <mxGeometry relative="1" as="geometry"></mxGeometry>
-</mxCell>
-<mxCell id="e5b" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeColor=#8A8F98;strokeWidth=1.1;jettySize=auto;orthogonalLoop=1;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="1" source="n5" target="n5b">
-  <mxGeometry relative="1" as="geometry"></mxGeometry>
-</mxCell>
-<mxCell id="e6" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeColor=#37474F;strokeWidth=1.3;jettySize=auto;orthogonalLoop=1;exitX=0.5;exitY=1;entryX=0.5;entryY=0;" edge="1" parent="1" source="n6" target="n7">
-  <mxGeometry relative="1" as="geometry"></mxGeometry>
-</mxCell>
-<mxCell id="e7" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeColor=#8A8F98;strokeWidth=1.1;jettySize=auto;orthogonalLoop=1;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="1" source="n7" target="n7b">
-  <mxGeometry relative="1" as="geometry"></mxGeometry>
-</mxCell>
-<mxCell id="e8" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeColor=#37474F;strokeWidth=1.3;jettySize=auto;orthogonalLoop=1;exitX=0.5;exitY=1;entryX=0.5;entryY=0;" edge="1" parent="1" source="n7" target="n8">
-  <mxGeometry relative="1" as="geometry"></mxGeometry>
-</mxCell>
-<mxCell id="e9" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeColor=#8A8F98;strokeWidth=1.1;jettySize=auto;orthogonalLoop=1;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="1" source="n8" target="n8b">
-  <mxGeometry relative="1" as="geometry"></mxGeometry>
-</mxCell>
-<mxCell id="e10" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeColor=#37474F;strokeWidth=1.3;jettySize=auto;orthogonalLoop=1;exitX=0.5;exitY=1;entryX=0.5;entryY=0;" edge="1" parent="1" source="n8" target="n9a">
-  <mxGeometry relative="1" as="geometry"></mxGeometry>
-</mxCell>
-<mxCell id="e11" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeColor=#37474F;strokeWidth=1.3;jettySize=auto;orthogonalLoop=1;exitX=0.5;exitY=1;entryX=0.5;entryY=0;" edge="1" parent="1" source="n9a" target="n9">
-  <mxGeometry relative="1" as="geometry"></mxGeometry>
-</mxCell>
-<mxCell id="e12" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeColor=#37474F;strokeWidth=1.3;jettySize=auto;orthogonalLoop=1;exitX=0.5;exitY=1;entryX=0;entryY=0.5;" edge="1" parent="1" source="n5" target="n10">
-  <mxGeometry relative="1" as="geometry"></mxGeometry>
-</mxCell>
-<mxCell id="e13" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeColor=#37474F;strokeWidth=1.3;jettySize=auto;orthogonalLoop=1;exitX=0.5;exitY=1;entryX=1;entryY=0.5;" edge="1" parent="1" source="n9" target="n10">
-  <mxGeometry relative="1" as="geometry"></mxGeometry>
-</mxCell>
-<mxCell id="e14" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeColor=#37474F;strokeWidth=1.3;jettySize=auto;orthogonalLoop=1;exitX=0;exitY=0.5;entryX=0;entryY=0.3;" edge="1" parent="1" source="n3" target="n11">
-  <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="20" y="220" /><mxPoint x="20" y="819" /></Array></mxGeometry>
-</mxCell>
-<mxCell id="e15" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeColor=#37474F;strokeWidth=1.3;jettySize=auto;orthogonalLoop=1;exitX=0.5;exitY=1;entryX=0.5;entryY=0;" edge="1" parent="1" source="n10" target="n11">
-  <mxGeometry relative="1" as="geometry"></mxGeometry>
-</mxCell>
-<mxCell id="e16" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeColor=#37474F;strokeWidth=1.3;jettySize=auto;orthogonalLoop=1;exitX=0.5;exitY=1;entryX=0.5;entryY=0;" edge="1" parent="1" source="n11" target="n12">
-  <mxGeometry relative="1" as="geometry"></mxGeometry>
-</mxCell>
-<mxCell id="l1" value="" style="endArrow=none;dashed=1;dashPattern=4 3;strokeColor=#B0BEC5;html=1;" edge="1" parent="1">
-  <mxGeometry relative="1" as="geometry">
-    <mxPoint x="0" y="260" as="sourcePoint" />
-    <mxPoint x="830" y="260" as="targetPoint" />
-  </mxGeometry>
-</mxCell>
-<mxCell id="l2" value="" style="endArrow=none;dashed=1;dashPattern=4 3;strokeColor=#B0BEC5;html=1;" edge="1" parent="1">
-  <mxGeometry relative="1" as="geometry">
-    <mxPoint x="0" y="765" as="sourcePoint" />
-    <mxPoint x="830" y="765" as="targetPoint" />
-  </mxGeometry>
-</mxCell>
-<mxCell id="z1" value="① 入力・初期化" style="text;html=1;align=left;verticalAlign=middle;fontSize=13;fontStyle=1;fontColor=#455A64;" vertex="1" parent="1">
-  <mxGeometry x="15" y="8" width="300" height="20" as="geometry" />
-</mxCell>
-<mxCell id="z2" value="② PDR・移動様態・経路補正" style="text;html=1;align=left;verticalAlign=middle;fontSize=13;fontStyle=1;fontColor=#455A64;" vertex="1" parent="1">
-  <mxGeometry x="15" y="268" width="320" height="20" as="geometry" />
-</mxCell>
-<mxCell id="z3" value="③ 位置推定" style="text;html=1;align=left;verticalAlign=middle;fontSize=13;fontStyle=1;fontColor=#455A64;" vertex="1" parent="1">
-  <mxGeometry x="15" y="773" width="260" height="20" as="geometry" />
-</mxCell>
-<mxCell id="leg_bt" value="先行研究の引用・踏襲" style="text;html=1;align=left;verticalAlign=middle;fontSize=10.5;fontStyle=0;fontColor=#37474F;" vertex="1" parent="1">
-  <mxGeometry x="674" y="38" width="160" height="22" as="geometry" />
-</mxCell>
-<mxCell id="leg_ot" value="本研究独自の拡張" style="text;html=1;align=left;verticalAlign=middle;fontSize=10.5;fontStyle=0;fontColor=#37474F;" vertex="1" parent="1">
-  <mxGeometry x="674" y="64" width="160" height="22" as="geometry" />
-</mxCell>
-<mxCell id="leg_gt" value="データ・出力" style="text;html=1;align=left;verticalAlign=middle;fontSize=10.5;fontStyle=0;fontColor=#37474F;" vertex="1" parent="1">
-  <mxGeometry x="674" y="90" width="160" height="22" as="geometry" />
-</mxCell>
+<mxCell id="z1" value="① 入力・初期化" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FAFBFC;strokeColor=#C7CDD4;dashed=1;dashPattern=8 6;verticalAlign=top;align=left;spacingLeft=12;spacingTop=6;fontSize=13;fontColor=#5A6570;fontStyle=1;arcSize=4;" vertex="1" parent="1"><mxGeometry x="30" y="40" width="950" height="270" as="geometry" /></mxCell>
+<mxCell id="z2" value="② PDR(距離・方位)と移動様態の推定" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FAFBFC;strokeColor=#C7CDD4;dashed=1;dashPattern=8 6;verticalAlign=top;align=left;spacingLeft=12;spacingTop=6;fontSize=13;fontColor=#5A6570;fontStyle=1;arcSize=4;" vertex="1" parent="1"><mxGeometry x="30" y="330" width="950" height="430" as="geometry" /></mxCell>
+<mxCell id="z3" value="③ 地図で拘束した位置推定" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FAFBFC;strokeColor=#C7CDD4;dashed=1;dashPattern=8 6;verticalAlign=top;align=left;spacingLeft=12;spacingTop=6;fontSize=13;fontColor=#5A6570;fontStyle=1;arcSize=4;" vertex="1" parent="1"><mxGeometry x="30" y="785" width="950" height="320" as="geometry" /></mxCell>
+<mxCell id="cfg" value="map_configs/*.json" style="shape=parallelogram;whiteSpace=wrap;html=1;fillColor=#F0F1F3;strokeColor=#6B7280;fontSize=12;perimeter=parallelogramPerimeter;arcSize=12;size=12;fixedSize=1;" vertex="1" parent="1"><mxGeometry x="60" y="90" width="210" height="44" as="geometry" /></mxCell>
+<mxCell id="cfgb" value="設定読み込み・適用&lt;br&gt;(必須値の欠落はエラー)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FBE4C4;strokeColor=#B5651D;fontSize=12;arcSize=10;" vertex="1" parent="1"><mxGeometry x="60" y="162" width="210" height="52" as="geometry" /></mxCell>
+<mxCell id="mapi" value="建物の平面図" style="shape=parallelogram;whiteSpace=wrap;html=1;fillColor=#F0F1F3;strokeColor=#6B7280;fontSize=12;perimeter=parallelogramPerimeter;arcSize=12;size=12;fixedSize=1;" vertex="1" parent="1"><mxGeometry x="320" y="90" width="210" height="44" as="geometry" /></mxCell>
+<mxCell id="mapb" value="二値化・壁抽出&lt;br&gt;(3.4節)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FBE4C4;strokeColor=#B5651D;fontSize=12;arcSize=10;" vertex="1" parent="1"><mxGeometry x="320" y="162" width="210" height="52" as="geometry" /></mxCell>
+<mxCell id="dist" value="壁距離場 dist_map&lt;br&gt;連続的な壁尤度 → 式(5.1)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FBE4C4;strokeColor=#B5651D;fontSize=12;arcSize=10;" vertex="1" parent="1"><mxGeometry x="600" y="85" width="250" height="56" as="geometry" /></mxCell>
+<mxCell id="rmask" value="経路帯マスクの自動抽出&lt;br&gt;route_source=auto (5.3節)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FBE4C4;strokeColor=#B5651D;fontSize=12;arcSize=10;" vertex="1" parent="1"><mxGeometry x="600" y="157" width="250" height="56" as="geometry" /></mxCell>
+<mxCell id="minfo" value="地図制約情報" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F0F1F3;strokeColor=#6B7280;fontSize=12;arcSize=10;" vertex="1" parent="1"><mxGeometry x="600" y="229" width="250" height="42" as="geometry" /></mxCell>
+<mxCell id="e1" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endFill=1;strokeColor=#37474F;strokeWidth=1.3;jettySize=auto;orthogonalLoop=1;" edge="1" parent="1" source="cfg" target="cfgb"><mxGeometry relative="1" as="geometry"></mxGeometry></mxCell>
+<mxCell id="e2" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endFill=1;strokeColor=#37474F;strokeWidth=1.3;jettySize=auto;orthogonalLoop=1;" edge="1" parent="1" source="mapi" target="mapb"><mxGeometry relative="1" as="geometry"></mxGeometry></mxCell>
+<mxCell id="e3" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endFill=1;strokeColor=#37474F;strokeWidth=1.3;jettySize=auto;orthogonalLoop=1;exitX=1;exitY=0.25;entryX=0;entryY=0.5;" edge="1" parent="1" source="mapb" target="dist"><mxGeometry relative="1" as="geometry"></mxGeometry></mxCell>
+<mxCell id="e4" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endFill=1;strokeColor=#37474F;strokeWidth=1.3;jettySize=auto;orthogonalLoop=1;exitX=1;exitY=0.75;entryX=0;entryY=0.5;" edge="1" parent="1" source="mapb" target="rmask"><mxGeometry relative="1" as="geometry"></mxGeometry></mxCell>
+<mxCell id="e5" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endFill=1;strokeColor=#37474F;strokeWidth=1.3;jettySize=auto;orthogonalLoop=1;exitX=1;exitY=0.5;entryX=1;entryY=0.25;" edge="1" parent="1" source="dist" target="minfo"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="880" y="113" /><mxPoint x="880" y="239" /></Array></mxGeometry></mxCell>
+<mxCell id="e6" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endFill=1;strokeColor=#37474F;strokeWidth=1.3;jettySize=auto;orthogonalLoop=1;exitX=0.5;exitY=1;entryX=0.5;entryY=0;" edge="1" parent="1" source="rmask" target="minfo"><mxGeometry relative="1" as="geometry"></mxGeometry></mxCell>
+<mxCell id="acc" value="加速度3軸" style="shape=parallelogram;whiteSpace=wrap;html=1;fillColor=#F0F1F3;strokeColor=#6B7280;fontSize=12;perimeter=parallelogramPerimeter;arcSize=12;size=12;fixedSize=1;" vertex="1" parent="1"><mxGeometry x="70" y="370" width="240" height="42" as="geometry" /></mxCell>
+<mxCell id="step" value="ステップ検出 (4.2節)&lt;br&gt;HPF+LPF、ピーク・谷・傾きの3条件" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#DCE6F5;strokeColor=#3B6DA8;fontSize=12;arcSize=10;" vertex="1" parent="1"><mxGeometry x="70" y="432" width="240" height="58" as="geometry" /></mxCell>
+<mxCell id="stepc" value="最短ピーク間隔を上限歩調2.9Hz&lt;br&gt;から決定 式(4.4)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FBE4C4;strokeColor=#B5651D;fontSize=12;arcSize=10;" vertex="1" parent="1"><mxGeometry x="70" y="508" width="240" height="58" as="geometry" /></mxCell>
+<mxCell id="slen" value="歩幅推定 (4.3節)&lt;br&gt;4乗根式 / 対数式 式(2.2)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#DCE6F5;strokeColor=#3B6DA8;fontSize=12;arcSize=10;" vertex="1" parent="1"><mxGeometry x="70" y="584" width="240" height="58" as="geometry" /></mxCell>
+<mxCell id="slenc" value="校正ゲイン g を乗算後にクリップ&lt;br&gt;式(4.5)。全CSV共通の定数倍" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FBE4C4;strokeColor=#B5651D;fontSize=12;arcSize=10;" vertex="1" parent="1"><mxGeometry x="70" y="660" width="240" height="58" as="geometry" /></mxCell>
+<mxCell id="e7" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endFill=1;strokeColor=#37474F;strokeWidth=1.3;jettySize=auto;orthogonalLoop=1;" edge="1" parent="1" source="acc" target="step"><mxGeometry relative="1" as="geometry"></mxGeometry></mxCell>
+<mxCell id="e8" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endFill=1;strokeColor=#37474F;strokeWidth=1.3;jettySize=auto;orthogonalLoop=1;" edge="1" parent="1" source="step" target="stepc"><mxGeometry relative="1" as="geometry"></mxGeometry></mxCell>
+<mxCell id="e9" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endFill=1;strokeColor=#37474F;strokeWidth=1.3;jettySize=auto;orthogonalLoop=1;" edge="1" parent="1" source="stepc" target="slen"><mxGeometry relative="1" as="geometry"></mxGeometry></mxCell>
+<mxCell id="e10" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endFill=1;strokeColor=#37474F;strokeWidth=1.3;jettySize=auto;orthogonalLoop=1;" edge="1" parent="1" source="slen" target="slenc"><mxGeometry relative="1" as="geometry"></mxGeometry></mxCell>
+<mxCell id="gyro" value="ジャイロ角速度 / yaw_deg" style="shape=parallelogram;whiteSpace=wrap;html=1;fillColor=#F0F1F3;strokeColor=#6B7280;fontSize=12;perimeter=parallelogramPerimeter;arcSize=12;size=12;fixedSize=1;" vertex="1" parent="1"><mxGeometry x="700" y="370" width="240" height="42" as="geometry" /></mxCell>
+<mxCell id="head" value="方位推定 (4.4節)&lt;br&gt;Madgwick updateIMU(地磁気なし)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#DCE6F5;strokeColor=#3B6DA8;fontSize=12;arcSize=10;" vertex="1" parent="1"><mxGeometry x="700" y="432" width="240" height="58" as="geometry" /></mxCell>
+<mxCell id="headc" value="初期方位の校正&lt;br&gt;静止区間 または 歩行開始後" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FBE4C4;strokeColor=#B5651D;fontSize=12;arcSize=10;" vertex="1" parent="1"><mxGeometry x="700" y="508" width="240" height="58" as="geometry" /></mxCell>
+<mxCell id="beh" value="移動様態判定 (4.7節)&lt;br&gt;直進 / 屈折 / 滞留" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#DCE6F5;strokeColor=#3B6DA8;fontSize=12;arcSize=10;" vertex="1" parent="1"><mxGeometry x="700" y="584" width="240" height="58" as="geometry" /></mxCell>
+<mxCell id="behc" value="ヨーレート75%ile + 方位変化の&lt;br&gt;AND条件 + ヒステリシス (5.4節)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FBE4C4;strokeColor=#B5651D;fontSize=12;arcSize=10;" vertex="1" parent="1"><mxGeometry x="700" y="660" width="240" height="58" as="geometry" /></mxCell>
+<mxCell id="e11" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endFill=1;strokeColor=#37474F;strokeWidth=1.3;jettySize=auto;orthogonalLoop=1;" edge="1" parent="1" source="gyro" target="head"><mxGeometry relative="1" as="geometry"></mxGeometry></mxCell>
+<mxCell id="e12" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endFill=1;strokeColor=#37474F;strokeWidth=1.3;jettySize=auto;orthogonalLoop=1;" edge="1" parent="1" source="head" target="headc"><mxGeometry relative="1" as="geometry"></mxGeometry></mxCell>
+<mxCell id="e13" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endFill=1;strokeColor=#37474F;strokeWidth=1.3;jettySize=auto;orthogonalLoop=1;" edge="1" parent="1" source="headc" target="beh"><mxGeometry relative="1" as="geometry"></mxGeometry></mxCell>
+<mxCell id="e14" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endFill=1;strokeColor=#37474F;strokeWidth=1.3;jettySize=auto;orthogonalLoop=1;" edge="1" parent="1" source="beh" target="behc"><mxGeometry relative="1" as="geometry"></mxGeometry></mxCell>
+<mxCell id="dec" value="経路情報を方位に&lt;br&gt;使うか&lt;br&gt;(prefer / enforce)" style="rhombus;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#37474F;fontSize=11;" vertex="1" parent="1"><mxGeometry x="400" y="440" width="210" height="104" as="geometry" /></mxCell>
+<mxCell id="rcor" value="経路方位補正 (5.4節)&lt;br&gt;区間切替・複数経路仮説&lt;br&gt;(auto では中心線抽出が必要)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF6E9;strokeColor=#B5651D;fontSize=12;arcSize=10;dashed=1;dashPattern=6 4;" vertex="1" parent="1"><mxGeometry x="395" y="570" width="220" height="76" as="geometry" /></mxCell>
+<mxCell id="merge" value="1歩分の歩幅・方位" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F0F1F3;strokeColor=#6B7280;fontSize=12;arcSize=10;" vertex="1" parent="1"><mxGeometry x="395" y="700" width="220" height="46" as="geometry" /></mxCell>
+<mxCell id="e15" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endFill=1;strokeColor=#37474F;strokeWidth=1.3;jettySize=auto;orthogonalLoop=1;exitX=0;exitY=0.5;entryX=1;entryY=0.5;" edge="1" parent="1" source="headc" target="dec"><mxGeometry relative="1" as="geometry"></mxGeometry></mxCell>
+<mxCell id="e16" value="はい" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endFill=1;strokeColor=#37474F;strokeWidth=1.3;jettySize=auto;orthogonalLoop=1;exitX=0.5;exitY=1;entryX=0.5;entryY=0;labelBackgroundColor=#FFFFFF;" edge="1" parent="1" source="dec" target="rcor"><mxGeometry relative="1" as="geometry"></mxGeometry></mxCell>
+<mxCell id="e17" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endFill=1;strokeColor=#37474F;strokeWidth=1.3;jettySize=auto;orthogonalLoop=1;" edge="1" parent="1" source="rcor" target="merge"><mxGeometry relative="1" as="geometry"></mxGeometry></mxCell>
+<mxCell id="e18" value="いいえ" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endFill=1;strokeColor=#37474F;strokeWidth=1.3;jettySize=auto;orthogonalLoop=1;exitX=0;exitY=0.5;entryX=0;entryY=0.5;labelBackgroundColor=#FFFFFF;" edge="1" parent="1" source="dec" target="merge"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="350" y="492" /><mxPoint x="350" y="723" /></Array></mxGeometry></mxCell>
+<mxCell id="e19" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endFill=1;strokeColor=#37474F;strokeWidth=1.3;jettySize=auto;orthogonalLoop=1;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="1" source="slenc" target="merge"><mxGeometry relative="1" as="geometry"></mxGeometry></mxCell>
+<mxCell id="e20" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endFill=1;strokeColor=#37474F;strokeWidth=1.3;jettySize=auto;orthogonalLoop=1;exitX=0;exitY=0.5;entryX=1;entryY=0.5;" edge="1" parent="1" source="behc" target="merge"><mxGeometry relative="1" as="geometry"></mxGeometry></mxCell>
+<mxCell id="pf" value="移動様態適応パーティクルフィルタによる位置推定&lt;br&gt;(第5章。詳細は図4.4)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#EEF0F4;strokeColor=#37474F;fontSize=13;fontStyle=1;arcSize=10;strokeWidth=1.6;" vertex="1" parent="1"><mxGeometry x="325" y="830" width="360" height="66" as="geometry" /></mxCell>
+<mxCell id="out1" value="推定位置・軌跡を二値地図上へ描画" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F0F1F3;strokeColor=#6B7280;fontSize=12;arcSize=10;" vertex="1" parent="1"><mxGeometry x="325" y="940" width="360" height="48" as="geometry" /></mxCell>
+<mxCell id="out2" value="results/ へ PNG・診断値CSVを保存" style="shape=parallelogram;whiteSpace=wrap;html=1;fillColor=#F0F1F3;strokeColor=#6B7280;fontSize=12;perimeter=parallelogramPerimeter;arcSize=12;size=12;fixedSize=1;" vertex="1" parent="1"><mxGeometry x="325" y="1015" width="360" height="48" as="geometry" /></mxCell>
+<mxCell id="e21" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endFill=1;strokeColor=#37474F;strokeWidth=1.3;jettySize=auto;orthogonalLoop=1;" edge="1" parent="1" source="merge" target="pf"><mxGeometry relative="1" as="geometry"></mxGeometry></mxCell>
+<mxCell id="e22" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endFill=1;strokeColor=#37474F;strokeWidth=1.3;jettySize=auto;orthogonalLoop=1;exitX=1;exitY=0.75;entryX=1;entryY=0.5;" edge="1" parent="1" source="minfo" target="pf"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="1015" y="261" /><mxPoint x="1015" y="863" /></Array></mxGeometry></mxCell>
+<mxCell id="e23" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endFill=1;strokeColor=#37474F;strokeWidth=1.3;jettySize=auto;orthogonalLoop=1;" edge="1" parent="1" source="pf" target="out1"><mxGeometry relative="1" as="geometry"></mxGeometry></mxCell>
+<mxCell id="e24" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endFill=1;strokeColor=#37474F;strokeWidth=1.3;jettySize=auto;orthogonalLoop=1;" edge="1" parent="1" source="out1" target="out2"><mxGeometry relative="1" as="geometry"></mxGeometry></mxCell>
+<mxCell id="lg0" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#DCE6F5;strokeColor=#3B6DA8;arcSize=10;" vertex="1" parent="1"><mxGeometry x="70" y="900" width="18" height="18" as="geometry" /></mxCell>
+<mxCell id="lgt0" value="先行研究の引用・踏襲" style="text;html=1;whiteSpace=wrap;fontSize=11;fontColor=#5A6570;align=left;verticalAlign=top;verticalAlign=middle;" vertex="1" parent="1"><mxGeometry x="96" y="900" width="260" height="18" as="geometry" /></mxCell>
+<mxCell id="lg1" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FBE4C4;strokeColor=#B5651D;arcSize=10;" vertex="1" parent="1"><mxGeometry x="70" y="927" width="18" height="18" as="geometry" /></mxCell>
+<mxCell id="lgt1" value="本研究独自の拡張(既定で有効)" style="text;html=1;whiteSpace=wrap;fontSize=11;fontColor=#5A6570;align=left;verticalAlign=top;verticalAlign=middle;" vertex="1" parent="1"><mxGeometry x="96" y="927" width="260" height="18" as="geometry" /></mxCell>
+<mxCell id="lg2" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF6E9;strokeColor=#B5651D;arcSize=10;dashed=1;dashPattern=6 4;" vertex="1" parent="1"><mxGeometry x="70" y="954" width="18" height="18" as="geometry" /></mxCell>
+<mxCell id="lgt2" value="本研究独自(既定は無効。比較条件)" style="text;html=1;whiteSpace=wrap;fontSize=11;fontColor=#5A6570;align=left;verticalAlign=top;verticalAlign=middle;" vertex="1" parent="1"><mxGeometry x="96" y="954" width="260" height="18" as="geometry" /></mxCell>
+<mxCell id="lg3" value="" style="shape=parallelogram;whiteSpace=wrap;html=1;fillColor=#F0F1F3;strokeColor=#6B7280;perimeter=parallelogramPerimeter;arcSize=12;size=12;fixedSize=1;" vertex="1" parent="1"><mxGeometry x="70" y="981" width="18" height="18" as="geometry" /></mxCell>
+<mxCell id="lgt3" value="データ・入出力" style="text;html=1;whiteSpace=wrap;fontSize=11;fontColor=#5A6570;align=left;verticalAlign=top;verticalAlign=middle;" vertex="1" parent="1"><mxGeometry x="96" y="981" width="260" height="18" as="geometry" /></mxCell>
+<mxCell id="cap" value="※ 破線の枠は実装済みだが既定では無効。比較実験のときだけ有効にする。" style="text;html=1;whiteSpace=wrap;fontSize=11;fontColor=#5A6570;align=left;verticalAlign=top;" vertex="1" parent="1"><mxGeometry x="70" y="1020" width="240" height="40" as="geometry" /></mxCell>
       </root>
     </mxGraphModel>
   </diagram>
