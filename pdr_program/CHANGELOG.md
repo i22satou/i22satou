@@ -1,5 +1,22 @@
 ## 2026-09-03
 
+(0) data_dirのCSV探索が、計測アプリの派生CSVまでセンサーログとして拾っていた。
+    `glob("pdr_log_*.csv")`は`pdr_log_XXXX_waypoints.csv`にもマッチする。計測アプリ
+    (AndroidStudioProjects/test2)はSTOP時に本体CSVと地点マークCSVを同時に共有するため、
+    次回の実測データをdata_dirへ置いた時点で発現する未発生バグだった。実害は例外だけでなく、
+    `get_or_select_start_position`が`validate_log`より先に呼ばれるため、地点マークCSVに
+    対して開始位置のクリック選択が始まり、非GUI環境では無限に待ち続ける
+    (再現確認: 修正前は10分経過してもタイムアウトせず、修正後は正常終了)。
+    判定を`is_sensor_log_csv()`に切り出し、`_waypoints` / `_ground_truth` / `_trajectory`
+    の接尾辞と`_traj_`を含む名前を除外した(`pdr_log_XXXX_utf8.csv`と、計測アプリが
+    同一分内の再記録で付ける`pdr_log_XXXX_2.csv`はセンサーログとして残す)。
+    監視モードの`CSVHandler.request_redraw`と、同じglobを持つ`check_sensor_quality.py`も
+    同じ判定に統一した(こちらはexcept節がValueErrorを拾うため停止はせず、
+    地点マークCSVに対する無意味な[警告]が出るだけだった)。
+    `compare_route_source.py`はsubprocessで`pdr_pf_improved.py`を呼ぶため自動的に追随する。
+    既定条件(kanri_4f, seed=42, --no-watch --no-show)の全ログを修正前と比較し、
+    診断値・最終推定位置とも完全一致することを確認済み(挙動は不変)。
+
 (1) 冒頭コメントの【方位推定方法】が「利用可能な場合は磁気センサを用いて方位を推定する」
     のままだった。磁気センサ融合(updateMARG)は2026-09-02(6)項で削除済みで、実際には
     ジャイロと加速度によるupdateIMUのみで動作している。フローチャートを実装と突き合わせた

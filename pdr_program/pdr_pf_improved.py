@@ -2147,14 +2147,45 @@ redraw_requested = threading.Event()
 result_cache = PDRResultCache()
 
 
+# [本研究独自] センサーログCSVと、同じフォルダに置かれる派生CSVを見分けるための接尾辞。
+# 計測アプリ(AndroidStudioProjects/test2)はSTOP時に pdr_log_XXXX.csv と
+# pdr_log_XXXX_waypoints.csv を同時に共有するため、両方が data_dir に入る。
+# "pdr_log_*.csv" だけで拾うと地点マークCSVをセンサーログとして読み込み、
+# validate_log が acc_x 欠落で例外を投げて実行全体が止まる(2026-09-03修正)。
+SIDECAR_CSV_SUFFIXES = (
+    "_waypoints",     # 計測アプリの地点マーク(timestamp, seq)
+    "_ground_truth",  # build_ground_truth.pyの出力(timestamp, x_px, y_px, point_type)
+    "_trajectory",    # 旧命名の推定軌跡(timestamp, x_px, y_px)
+)
+# 現行命名の推定軌跡(pdr_log_XXXX_traj_{条件}_seed-*.csv)は末尾一致では拾えない
+SIDECAR_CSV_MARKERS = ("_traj_",)
+
+
+def is_sensor_log_csv(path):
+    """data_dir内のCSVが解析対象のセンサーログかを判定する。
+
+    センサーログ本体(pdr_log_XXXX.csv、旧形式の pdr_log_XXXX_utf8.csv を含む)だけを
+    Trueにし、同じ命名規則で作られる派生CSVはFalseにする。
+    """
+    path = Path(path)
+    if path.suffix.lower() != ".csv":
+        return False
+    stem = path.stem
+    if not stem.startswith("pdr_log_"):
+        return False
+    if stem.endswith(SIDECAR_CSV_SUFFIXES):
+        return False
+    if any(marker in stem for marker in SIDECAR_CSV_MARKERS):
+        return False
+    return True
+
+
 # CSV 変更検出ハンドラ
 class CSVHandler(FileSystemEventHandler):
 
     def request_redraw(self, path):
         csv_path = Path(path)
-        if csv_path.suffix.lower() != ".csv":
-            return
-        if not csv_path.name.startswith("pdr_log_"):
+        if not is_sensor_log_csv(csv_path):
             return
 
         logging.info("\n===================================")
@@ -2209,7 +2240,10 @@ def redraw_all_paths():
             zorder=8,
         )
 
-    file_list = glob.glob(str(data_dir / "pdr_log_*.csv"))
+    file_list = [
+        f for f in glob.glob(str(data_dir / "pdr_log_*.csv"))
+        if is_sensor_log_csv(f)
+    ]
     if EXCLUDED_CSV_NAMES:
         excluded_found = [f for f in file_list if Path(f).name in EXCLUDED_CSV_NAMES]
         file_list = [f for f in file_list if Path(f).name not in EXCLUDED_CSV_NAMES]

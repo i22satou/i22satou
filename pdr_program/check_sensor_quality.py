@@ -132,7 +132,11 @@ def main():
     _map_config, fake_args = pdrmod.load_map_config_for_tool(args_cli.map_config)
 
     data_dir = fake_args.data_dir
-    file_list = sorted(data_dir.glob("pdr_log_*.csv"))
+    # pdr_pf_improved.py と同じ判定を使い、地点マークCSV等の派生ファイルを除外する
+    # (除外しないと validate_log が列不足で ValueError を投げ、無意味な[警告]が並ぶ)
+    file_list = sorted(
+        f for f in data_dir.glob("pdr_log_*.csv") if pdrmod.is_sensor_log_csv(f)
+    )
     if not args_cli.include_excluded and pdrmod.EXCLUDED_CSV_NAMES:
         skipped = [f for f in file_list if f.name in pdrmod.EXCLUDED_CSV_NAMES]
         file_list = [f for f in file_list if f.name not in pdrmod.EXCLUDED_CSV_NAMES]
