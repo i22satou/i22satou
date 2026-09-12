@@ -1,0 +1,21 @@
+name: sato0608へミラーpush
+
+on:
+  push:
+    branches:
+      - "**"
+
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 全履歴つきでチェックアウト
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: sato0608/graduation-research へpush
+        run: |
+          git remote add mirror "https://${{ secrets.MIRROR_TOKEN }}@github.com/sato0608/graduation-research.git"
+          git push mirror --all
+          git push mirror --tags
