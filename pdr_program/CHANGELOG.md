@@ -1,5 +1,14 @@
 <!-- 新しい項目はこの直下に追加する。2026-09-02以前の項目はCHANGELOG_archive.md。月が変わったら前月分をアーカイブへ移す。 -->
 
+## 2026-09-18
+
+(0) CSVフォルダを環境変数`PDR_DATA_DIR`で指定できるようにした。優先順位は
+    `--data-dir` > `PDR_DATA_DIR` > JSONの`data_dir`。JSONの`data_dir`はMacのパスのため、
+    Windows(Google Driveは`G:\マイドライブ\PDR`)では環境変数で上書きする。
+    `apply_map_config()`内の変更なので、`tools/`・`evaluation/`のスクリプトも同じ規則に従う。
+    環境変数が未設定なら従来と同じ動作。kanri_4f・seed=42で`--data-dir`指定時と
+    環境変数指定時の出力PNG(MD5)とログが完全一致し、入力CSVが不変であることを確認した。
+
 ## 2026-09-03
 
 (0) data_dirのCSV探索が、計測アプリの派生CSVまでセンサーログとして拾っていた。

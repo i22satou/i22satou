@@ -1199,7 +1199,7 @@ def parse_args():
         "--data-dir",
         type=Path,
         default=None,
-        help="pdr_log_*.csv があるディレクトリ。指定するとJSONの値を上書きします。",
+        help="pdr_log_*.csv があるディレクトリ。指定するとJSONの値と環境変数PDR_DATA_DIRを上書きします。",
     )
     parser.add_argument(
         "--map",
@@ -1709,8 +1709,16 @@ def apply_map_config(args, config, config_path):
     UNCERTAINTY_PARTICLES_MIN = int(adaptive.get("uncertainty_particles_min", 80))
     UNCERTAINTY_PARTICLES_MAX = int(adaptive.get("uncertainty_particles_max", 1200))
 
-    data_dir = (resolve_config_value_path(config.get("data_dir"), config_dir)
-                if args.data_dir is None else args.data_dir.expanduser().resolve())
+    # CSVフォルダの優先順位: --data-dir > 環境変数PDR_DATA_DIR > JSONのdata_dir。
+    # JSONのdata_dirはMacのパスなので、Windows等では環境変数で上書きする(2026-09-18)。
+    env_data_dir = os.environ.get("PDR_DATA_DIR")
+    if args.data_dir is not None:
+        data_dir = args.data_dir.expanduser().resolve()
+    elif env_data_dir:
+        data_dir = Path(env_data_dir).expanduser().resolve()
+        logging.info(f"環境変数PDR_DATA_DIRのCSVフォルダを使用: {data_dir}")
+    else:
+        data_dir = resolve_config_value_path(config.get("data_dir"), config_dir)
     map_path = (resolve_config_value_path(config.get("map_image"), config_dir)
                 if args.map is None else args.map.expanduser().resolve())
     if data_dir is None:
