@@ -136,8 +136,11 @@ METHODS = [
      "args": condition_args(**PROPOSED, mh=True, branch_sigma=90.0)},
     {"key": "E_rooms", "tiny": "E+\n部屋", "label": "提案方式+広い部屋の除外", "short": "E+部屋\nの除外", "section": "",
      "kind": "variant", "args": condition_args(**PROPOSED, rooms=True)},
-    {"key": "E_centerline", "tiny": "E+\n中心線", "label": "提案方式+中心線", "short": "E+中心線", "section": "",
-     "kind": "variant", "args": condition_args(**PROPOSED, centerline=True)},
+    # 中心線は、広い部屋の除外なしではkanri_4fの通路網が輪状に見えて抽出が見送られ、
+    # 提案方式と同じ結果になる(2026-09-18に確認)。そのため部屋の除外と組み合わせる。
+    {"key": "E_rooms_centerline", "tiny": "E+部屋\n+中心線",
+     "label": "提案方式+広い部屋の除外+中心線", "short": "E+部屋除外\n+中心線", "section": "",
+     "kind": "variant", "args": condition_args(**PROPOSED, rooms=True, centerline=True)},
 ]
 METHOD_KEYS = [m["key"] for m in METHODS]
 METRICS = [("rmse_m", "RMSE"), ("mean_error_m", "平均誤差"), ("max_error_m", "最大誤差")]

@@ -85,7 +85,7 @@ PDR(歩行者自律測位)+移動様態適応型パーティクルフィルタ�
 | 複数経路仮説 | `--multi-hypothesis-routing` |
 | 複数経路仮説+分岐選別尤度 | `--multi-hypothesis-routing --multi-hypothesis-branch-likelihood-sigma-deg 90` |
 | 広い部屋の除外 | `--auto-route-exclude-wide-rooms` |
-| 中心線による方位補正 | `--auto-route-centerline`(複数経路仮説とは併用不可) |
+| 広い部屋の除外+中心線による方位補正 | `--auto-route-exclude-wide-rooms --auto-route-centerline`(中心線は部屋の除外なしではこの地図で抽出されないため組み合わせる。複数経路仮説とは併用不可) |
 
 - 方式BとCはどちらも連続壁尤度(`dist_map`)を使う。違いは様態適応の有無だけ。
 - 方式D(手動経路route_points)は比較に含めない。今の`route_points`は0805の経路用で、新しい経路とは合わない。
