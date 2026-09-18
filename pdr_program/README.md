@@ -40,6 +40,11 @@ PDR(歩行者自律測位)+移動様態適応型パーティクルフィルタ�
 - `calibrate_step_length.py` — 歩幅校正ゲイン(`step_length_calibration_gain`)の再同定。
   計測一覧表の`calib`の行(距離既知の直線歩行)から全CSV共通のゲインを1つ求め、ファイル別の表・
   leave-one-out・歩調と歩幅の図を`results/`へ出す。`--self-test`あり。JSONへの反映は手動
+- `run_evaluation.py` — **卒論第7章の比較実験を一括実行する評価ハーネス**。計測一覧表の`eval`の行
+  について、正解位置の作成→本体を「方式×シード」で実行→RMSE等の計算までを行い、方式別・ファイル別の
+  表(平均±標準偏差)、箱ひげ図、軌跡図、実行条件の記録を`results/<日時>_evaluation[_tag]/`へ出す。
+  開始位置は経路の目印1番、初期方位は目印1→2の向きから自動で決め、経路名の書き間違いも確かめる。
+  `--self-test`(架空データで本体を実際に動かす通し試験。本物の`start_positions.csv`・`results/`には書かない)あり
 - `measurement_list.py` — 計測一覧表(下記)を読む共通部品
 - `build_ground_truth.py` — 正解位置データ作成Phase 2(waypoints×landmarksをseq結合)
 - `evaluate_accuracy.py` — 推定軌跡と正解位置からRMSE等を計算
@@ -57,7 +62,8 @@ PDR(歩行者自律測位)+移動様態適応型パーティクルフィルタ�
 
 ## 比較方式と実行オプション(卒論第7章)
 
-評価ハーネス(`evaluation/run_evaluation.py`、作成予定)はこの表どおりに実行する。
+評価ハーネス(`evaluation/run_evaluation.py`の`METHODS`)はこの表どおりに実行する。表を変えるときは両方を直す。
+ハーネスは、表に書いたもの以外の既定OFFの機能も`--no-…`で明示的に切って渡す(JSONの既定値が変わっても条件が変わらないように)。
 方式の定義は卒論雛形6.4、条件を決めた経緯は`../memo/comparison_methods.md`。
 
 **全方式に共通**: `--map-config map_configs/kanri_4f.json --no-watch --no-show --seed <1 7 42 100 777 2024>
@@ -99,9 +105,14 @@ pdr_log_0925_1030.csv,eval,east_std,,,1,
 - `purpose`: `calib`(歩幅校正用の直線歩行、`distance_m`と`speed`=slow/normal/fastを書く)/
   `eval`(比較実験用、`route`=`ground_truth/kanri_4f_landmarks_<route>.csv`の`<route>`を書く)
 - `use`: 撮り直した記録は消さずに`0`にする
+- 任意の`start_heading_deg`列(memoの前): 経路が定義されていない`eval`の記録だけに書く、歩き始めの向き[度]。
+  この場合は`start_positions.csv`に開始位置の登録が必要で、RMSEは出ない(軌跡だけ)
+- 新しい経路(逆向き・途中から途中まで等)は、`ground_truth/routes.json`に目印IDを歩く順に並べて追加し、
+  `python tools/make_route_landmarks.py --route <経路名>`を実行すれば、あとは`run_evaluation.py`が自動で扱う
 - **校正用CSVはdata_dir直下に置かず、サブフォルダ(例: `calib/`)へ入れる**。直下に置くと、
   本体が開始位置の登録を求めてクリック待ちで止まる
-- 例: `ground_truth/measurement_list_0805.csv`(既存3本。2.10の再現確認用)
+- 例: `ground_truth/measurement_list_0805.csv`(既存3本。calibの行は2.10の再現確認用、evalの行は
+  `run_evaluation.py`の動作確認用で、経路が未定義のためRMSEは出ない)
 
 ## データ
 

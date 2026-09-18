@@ -2,6 +2,7 @@
 # evaluate_accuracy.py
 #
 # 【変更履歴】
+# - 2026-09-18: --self-test の一時ファイルを/tmp固定からtempfileへ変更(Windowsで失敗していた)。
 # - 2026-08-16: [本研究独自] 新規作成。正解位置列(タイムスタンプ付き)を用いた
 #               平均位置誤差・RMSE・最大誤差の計算基盤(進捗反映版メモ§23の
 #               Week1タスク)。実測の正解データは2026年10月に収集予定のため、
@@ -40,6 +41,8 @@
 
 import argparse
 import logging
+import tempfile
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -162,12 +165,13 @@ def _self_test():
     gt_t = est_t[gt_indices]
     gt_p = est_p[gt_indices] + rng.normal(0, noise_std_px, size=(len(gt_indices), 2))
 
-    est_path = "/tmp/_evaluate_accuracy_selftest_est.csv"
-    gt_path = "/tmp/_evaluate_accuracy_selftest_gt.csv"
-    pd.DataFrame({"timestamp": est_t, "x_px": est_p[:, 0], "y_px": est_p[:, 1]}).to_csv(est_path, index=False)
-    pd.DataFrame({"timestamp": gt_t, "x_px": gt_p[:, 0], "y_px": gt_p[:, 1]}).to_csv(gt_path, index=False)
-
-    summary = evaluate(est_path, gt_path, scale_px_per_m=11.4)
+    # /tmp固定だとWindowsで失敗するため、OSに合った一時フォルダを使う(2026-09-18)。
+    with tempfile.TemporaryDirectory() as td:
+        est_path = Path(td) / "est.csv"
+        gt_path = Path(td) / "gt.csv"
+        pd.DataFrame({"timestamp": est_t, "x_px": est_p[:, 0], "y_px": est_p[:, 1]}).to_csv(est_path, index=False)
+        pd.DataFrame({"timestamp": gt_t, "x_px": gt_p[:, 0], "y_px": gt_p[:, 1]}).to_csv(gt_path, index=False)
+        summary = evaluate(est_path, gt_path, scale_px_per_m=11.4)
     expected_rmse = noise_std_px * np.sqrt(2)
 
     print("=== evaluate_accuracy.py 自己テスト(合成データ) ===")

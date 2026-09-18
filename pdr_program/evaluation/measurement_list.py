@@ -5,6 +5,7 @@
 # - 2026-09-18: [本研究独自] 新規作成。計測日に書く一覧表(計測一覧)を読む共通部品。
 #               calibrate_step_length.py(校正用の行)と、今後作る run_evaluation.py
 #               (評価用の行)が同じ読み方・同じ検査を使うために分けた。
+#               同日、経路が定義されていない評価用の記録のため任意列 start_heading_deg を追加。
 #
 # 【一覧表の形式】1回の計測で1枚。UTF-8でもExcelの既定(Shift-JIS)保存でも読める。
 #   file,purpose,route,distance_m,speed,use,memo
@@ -20,7 +21,11 @@
 #   distance_m: calibのとき必須。実際に歩いた距離[m](巻尺などで測った値)
 #   speed     : calibのとき slow / normal / fast。空欄は「不明」として扱う
 #   use       : 1 = 使う / 0 = 使わない(撮り直した記録も消さずに残せるように)。空欄は1
-#   memo      : 自由記述(プログラムは読まない)
+#   start_heading_deg: 任意の列(普段は書かない)。evalで経路が定義されていない記録
+#               (routeが空欄。例: 既存の0805の3本)の歩き始めの地図上の向き[度]
+#               (右=0、下=90、左=180、上=-90)。この場合、開始位置はstart_positions.csvに
+#               登録済みである必要がある。routeがあるときは経路から向きを決めるので不要
+#   memo      : 自由記述(プログラムは読まない)。最後の列に置くこと
 #
 # 一覧表の誤り(必須欄の空欄・数値でない距離・想定外の速さ)は、黙って行を飛ばさず、
 # 表計算ソフトの行番号付きで全件をまとめてエラーにする。計測日に書いた表をその場で
@@ -33,7 +38,7 @@ from pathlib import Path
 
 import pandas as pd
 
-COLUMNS = ["file", "purpose", "route", "distance_m", "speed", "use", "memo"]
+COLUMNS = ["file", "purpose", "route", "distance_m", "speed", "use", "start_heading_deg", "memo"]
 PURPOSES = {"calib", "eval"}
 SPEEDS = ["slow", "normal", "fast"]
 _TRUE_WORDS = {"", "1", "true", "yes", "y", "o", "○"}
@@ -116,7 +121,7 @@ def load_measurement_list(path, purpose):
     df["use"] = uses
 
     selected = df[(df["purpose"] == purpose) & df["use"]].copy()
-    distances = []
+    distances, headings = [], []
     for _, row in selected.iterrows():
         where = f"{row['sheet_row']}行目({row['file'] or 'file空欄'})"
         if not row["file"]:
@@ -132,14 +137,26 @@ def load_measurement_list(path, purpose):
             distances.append(distance)
             if row["speed"] and row["speed"].lower() not in SPEEDS:
                 errors.append(f"{where}: speed は {SPEEDS} か空欄(「{row['speed']}」)")
-        elif not row["route"]:
-            errors.append(f"{where}: eval の行は route が必須")
+        else:
+            heading = float("nan")
+            if row["start_heading_deg"]:
+                try:
+                    heading = float(row["start_heading_deg"])
+                except ValueError:
+                    errors.append(f"{where}: start_heading_deg は数値[度]"
+                                  f"(「{row['start_heading_deg']}」)")
+            elif not row["route"]:
+                errors.append(f"{where}: eval の行は route が必須"
+                              "(経路が定義されていない記録なら start_heading_deg を書く)")
+            headings.append(heading)
 
     if errors:
         raise ValueError(f"{path} に誤りがあります:\n  " + "\n  ".join(errors))
     if purpose == "calib":
         selected["distance_m"] = distances
         selected["speed"] = selected["speed"].str.lower()
+    else:
+        selected["start_heading_deg"] = headings
     duplicated = selected["file"][selected["file"].duplicated()].tolist()
     if duplicated:
         raise ValueError(f"{path}: 同じファイルが2回以上あります: {duplicated}")
