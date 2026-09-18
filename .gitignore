@@ -1,3 +1,6 @@
 __pycache__/
 *.pyc
 .DS_Store
+# run_evaluation.py の各実行のPNG・ログ・軌跡CSV(数十枚になる)。
+# 同じフォルダの conditions.json とコミット番号から作り直せるので、表・図・記録だけをコミットする。
+pdr_program/results/*_evaluation*/runs/

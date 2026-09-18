@@ -1,0 +1,54 @@
+{
+  "map_image": "../kanri_4f_binary_final3.png",
+  "data_dir": "/Users/soma/Library/CloudStorage/GoogleDrive-satosoma0608@gmail.com/マイドライブ/PDR",
+  "scale_px_per_m": 11.4,
+  "step_gain": 1.0,
+  "step_length_calibration_gain": 2.10,
+  "pf_erosion_radius_px": 1,
+  "gyro_unit": "rad",
+  "wall_weight_sigma": 0.6,
+  "wall_weight_floor": 0.5,
+  "off_route_weight": 0.15,
+  "route_width_px": 18.0,
+  "route_constraint_mode": "none",
+  "route_heading_weight": 1.5,
+  "route_corner_threshold_px": 25.0,
+  "route_points": [
+    [100.0,230.0],
+    [425.0,230.0],
+    [425.0,115.0],
+    [800.0,115.0]
+  ],
+  "exclude_csv": [
+    "pdr_log_0410_1535.csv",
+    "pdr_log_0414_0902.csv",
+    "pdr_log_0414_0940.csv",
+    "pdr_log_0624_14.csv"
+  ],
+  "adaptive_pf": {
+  "uncertainty_adaptive_particles": true,
+  "particles_straight": 250,
+  "particles_turning": 600,
+  "particles_stopped": 100,
+
+  "sigma_step_straight_px": 0.35,
+  "sigma_step_turning_px": 0.7,
+  "sigma_step_stopped_px": 0.1,
+
+  "sigma_angle_straight_deg": 3.0,
+  "sigma_angle_turning_deg": 15.0,
+  "sigma_angle_stopped_deg": 2.0,
+
+  "behavior_window_sec": 1.5,
+
+  "turn_enter_threshold_deg": 20.0,
+  "turn_exit_threshold_deg": 6.0,
+  "turn_yaw_rate_threshold_deg_s": 20.0,
+
+  "particle_resize_jitter_px": 0.5,
+
+  "fixed_particles": 600,
+  "fixed_sigma_step_px": 0.7,
+  "fixed_sigma_angle_deg": 15.0
+}
+}

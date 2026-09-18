@@ -119,7 +119,8 @@ pdr_log_0925_1030.csv,eval,east_std,,,1,
 - `map_configs/` — 地図設定JSON(`kanri_4f.json`が主対象、`l_map.json`は技術確認用)
 - `kanri_4f_binary_final3.png` / `kanri_4f_preview_final3.png` / `L_map.png` — 地図画像
 - `start_positions.csv` — CSVごとの既知開始位置(自動生成・追記される)
-- `results/` — 実行結果PNG・診断CSVの保存先(自動生成される)
+- `results/` — 実行結果PNG・診断CSVの保存先(自動生成される)。`run_evaluation.py`の出力フォルダのうち
+  `runs/`(各実行のPNG・ログ・軌跡CSV)はgitに入れない(`.gitignore`)。日ごとの結果の案内は`results/<日付>_summary.md`
 
 ## ここに含めていないもの
 

@@ -36,6 +36,8 @@
 #   table_by_method.csv       方式別。全ファイル×全シードの平均±標準偏差
 #   table_by_method_file.csv  方式別・ファイル別。シード間の平均±標準偏差
 #                             (方式Aは乱数を使わないので1ファイル1値)
+#   table_diagnostics.csv     方式別・ファイル別の全滅回数・最終位置(正解位置が無くても出す。
+#                             精度の指標ではない)
 #   results_long.csv          1実行・1ファイルごとの全数値(全滅回数・最終位置も)
 #   boxplot_rmse.png / boxplot_rmse_by_file.png / trajectory_<CSV名>.png
 #   conditions.json           実行条件(gitのコミット番号、各方式のオプション、ファイル別の
@@ -469,8 +471,11 @@ def collect_results(items, methods, seeds, diag, ctx):
                 row["error"] = "PDRのみの軌跡CSVが無い"
                 notes.append(f"{item['name']} A_pdr: {row['error']}")
             else:
-                add_metrics(row, ctx["out_dir"] / "runs" / "A_pdr"
-                            / pdr_name.format(stem=item["stem"]), item)
+                pdr_path = ctx["out_dir"] / "runs" / "A_pdr" / pdr_name.format(stem=item["stem"])
+                trajectory = pd.read_csv(pdr_path)
+                row.update({"steps": len(trajectory), "final_x": trajectory["x_px"].iloc[-1],
+                            "final_y": trajectory["y_px"].iloc[-1]})
+                add_metrics(row, pdr_path, item)
             rows.append(row)
 
     df = pd.DataFrame(rows)
@@ -486,8 +491,26 @@ def collect_results(items, methods, seeds, diag, ctx):
     return df.sort_values(["method_key", "file", "seed"]).reset_index(drop=True), notes
 
 
-def format_mean_std(mean, std):
-    return f"{mean:.2f} ± {std:.2f}" if np.isfinite(std) else f"{mean:.2f}"
+def format_mean_std(mean, std, digits=2):
+    if not np.isfinite(mean):
+        return ""
+    return f"{mean:.{digits}f} ± {std:.{digits}f}" if np.isfinite(std) else f"{mean:.{digits}f}"
+
+
+def summarize_diagnostics(df):
+    """正解位置の有無によらず出せる診断値(全滅回数・最終位置)を方式・ファイルごとにまとめる。
+    精度の指標ではない。方式Aは粒子が無いので全滅回数は空欄。"""
+    grouped = df.groupby(["method_key", "file"], observed=True, sort=True)
+    out = grouped.size().rename("n").to_frame()
+    out.insert(0, "方式", grouped["method"].first())
+    for column, label, digits in (("extinctions", "全滅回数", 1), ("final_x", "最終位置x[px]", 1),
+                                  ("final_y", "最終位置y[px]", 1)):
+        values = pd.to_numeric(df[column], errors="coerce").groupby(
+            [df["method_key"], df["file"]], observed=True, sort=True)
+        mean, std = values.mean(), values.std(ddof=1)
+        out[f"{label} 平均±標準偏差"] = [format_mean_std(a, b, digits) for a, b in zip(mean, std)]
+        out[f"{column}_mean"], out[f"{column}_std"] = mean, std
+    return out.reset_index()
 
 
 def summarize(df, keys):
@@ -691,7 +714,11 @@ def run_evaluation(list_path, data_dir, map_config, out_root=RESULTS_DIR, tag=No
         df.insert(0, "注意", "架空データ(研究結果ではない)")
     df.to_csv(out_dir / "results_long.csv", index=False, encoding="utf-8-sig")
 
-    tables = {}
+    tables = {"table_diagnostics": summarize_diagnostics(df)}
+    if synthetic:
+        tables["table_diagnostics"].insert(0, "注意", "架空データ(研究結果ではない)")
+    tables["table_diagnostics"].to_csv(out_dir / "table_diagnostics.csv", index=False,
+                                       encoding="utf-8-sig", float_format="%.4f")
     if df["has_ground_truth"].any() and df["rmse_m"].notna().any():
         for name, keys in (("table_by_method", ["method_key"]),
                            ("table_by_method_file", ["method_key", "file"])):
@@ -827,6 +854,8 @@ def _self_test(keep_dir=None):
             _write_synthetic_walk(data / name, 25, 37.0, rng)
             t_steps, cum = _synthetic_truth(data / name)
             assert len(t_steps) == 25, len(t_steps)
+            if direction < 0:
+                cum_west = cum  # 西向きの記録の、PDRのみの終点の確認に使う
             xs = [x0] + [x0 + direction * cum[j] for j in marks]
             if route not in written_routes:
                 pd.DataFrame({"seq": range(1, len(xs) + 1), "label": [f"p{i}" for i in range(len(xs))],
@@ -890,7 +919,12 @@ def _self_test(keep_dir=None):
         assert "pdr_log_9001_0002.csv" not in set(result["tables"]["table_by_method_file"]["file"])
         print("  OK: 正解位置の無い記録は軌跡だけ出して表から外す。全8方式が表にそろう")
 
+        diagnostics = pd.read_csv(out_dir / "table_diagnostics.csv")
+        assert len(diagnostics) == len(METHOD_KEYS) * 3, len(diagnostics)  # 8方式×3本
+        pdr_final = df[(df["method_key"] == "A_pdr") & (df["file"] == "pdr_log_9001_0003.csv")]
+        assert abs(pdr_final["final_x"].iloc[0] - (380.0 - cum_west[-1])) < 1e-6, pdr_final
         for name in ("table_by_method.csv", "table_by_method_file.csv", "results_long.csv",
+                     "table_diagnostics.csv",
                      "boxplot_rmse.png", "boxplot_rmse_by_file.png", "conditions.json",
                      "used_map_config.json", "measurement_list.csv",
                      "trajectory_pdr_log_9001_0001.png", "trajectory_pdr_log_9001_0003.png"):
