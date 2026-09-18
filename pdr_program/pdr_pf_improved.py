@@ -4,7 +4,11 @@
 # 【変更履歴】
 # 全履歴はCHANGELOG.md。変更したらCHANGELOG.mdの先頭へ日付付きで1項目追加すること。
 # 直近のみ下記に残す(古い項目は消してよい):
-# - 2026-09-02: PDR上流(距離・方位)の系統誤差を4点修正。(1)ステップ検出が歩行加速度
+# - 2026-09-18: [本研究独自] 卒論第7章の比較方式を実行できるようにした。方式A(PDRのみ)
+#               の軌跡CSV(--save-pdr-trajectory-csv)、方式B(固定粒子数PF、--pf-mode fixed)、
+#               軌跡CSVの保存先指定(--trajectory-dir)。既定の動作は不変。
+#               方式とオプションの対応はREADME.md「比較方式」、詳細はCHANGELOG.md。
+# - 2026-09-02:PDR上流(距離・方位)の系統誤差を4点修正。(1)ステップ検出が歩行加速度
 #               の第2高調波に反応し歩数を約1.7〜1.8倍に過検出していた問題を、最短
 #               ピーク間隔を上限歩調ベース(MAX_STEP_FREQUENCY_HZ)へ変更して是正。
 #               (2)歩幅の約1/2過小推定へ校正ゲインSTEP_LENGTH_CALIBRATION_GAINを追加。
@@ -335,6 +339,16 @@ UNCERTAINTY_BOOST_FACTOR = 1.5
 UNCERTAINTY_SHRINK_FACTOR = 0.75
 UNCERTAINTY_PARTICLES_MIN = 80
 UNCERTAINTY_PARTICLES_MAX = 1200
+
+# [本研究独自] 比較実験用の基準方式「固定粒子数PF」(卒論6.4の方式B)の切り替え。
+# "adaptive"(既定)は[先行研究:移動様態PF]どおり様態別に粒子数・ノイズを切り替える。
+# "fixed"は様態によらず粒子数・ノイズを一定にし、不確実性適応粒子数も無効にする。
+# 実装はapply_map_config()で直進・曲がり・滞留の3組のパラメータを同じ値にそろえるだけで、
+# 以降の初期化・configure_behavior()は既存のコードをそのまま通る。移動様態の判定自体は
+# 動き続けるが(ログの内訳用)、PFには影響しない。値はJSONのadaptive_pf.fixed_*。
+# kanri_4f.jsonの600粒子・0.7px・15度は、移動様態適応PFの平均粒子数(約530〜590)と
+# 計算量をそろえ、曲がり角で破綻しないノイズにした(memo/comparison_methods.md)。
+PF_MODE = "adaptive"
 
 # [本研究独自] ステップ検出の最短ピーク間隔は、歩行の生理的な上限歩調から導出する。
 # 従来のSTEP_MIN_INTERVAL=5(サンプル数の直書き)は52.9Hzでは上限10.6歩/sに相当し
@@ -1228,6 +1242,26 @@ def parse_args():
         ),
     )
     parser.add_argument(
+        "--save-pdr-trajectory-csv",
+        action="store_true",
+        help=(
+            "[本研究独自] 比較用の方式A(PDRのみ)の軌跡を、--save-trajectory-csvと同じ形式"
+            "(timestamp, x_px, y_px)で保存します。歩幅と経路補正前のセンサー方位だけで"
+            "積算した、PFを通す前の軌跡です。乱数を使わないので、PFの条件やシードに"
+            "よらず同じになります。"
+        ),
+    )
+    parser.add_argument(
+        "--trajectory-dir",
+        type=Path,
+        default=None,
+        help=(
+            "[本研究独自] 軌跡CSV(--save-trajectory-csv / --save-pdr-trajectory-csv)の"
+            "保存先フォルダ。未指定ならRESULTS_DIR。評価ハーネスが条件ごとに保存先を分けて、"
+            "同名ファイルの上書きを防ぐためのもの。"
+        ),
+    )
+    parser.add_argument(
         "--seed",
         type=int,
         default=None,
@@ -1430,6 +1464,20 @@ def parse_args():
         help="上側閾値超のときの粒子数倍率(既定0.75)。感度分析用にJSON設定を上書きする。",
     )
     parser.add_argument(
+        "--pf-mode",
+        choices=["adaptive", "fixed"],
+        default=None,
+        help=(
+            "[本研究独自] PFの粒子数・ノイズの決め方。adaptive=移動様態に応じて切り替える"
+            "(先行研究、既定)、fixed=様態によらず一定(比較用の固定粒子数PF、卒論6.4の方式B)。"
+            "fixedでは不確実性適応粒子数も無効になる。既定はJSON設定(無指定ならadaptive)。"
+        ),
+    )
+    parser.add_argument(
+        "--fixed-particles", type=int, default=None,
+        help="--pf-mode fixedの粒子数。JSONのadaptive_pf.fixed_particlesを上書きする(感度分析用)。",
+    )
+    parser.add_argument(
         "--heading-source",
         choices=["gyro", "android"],
         default="gyro",
@@ -1530,6 +1578,7 @@ def apply_map_config(args, config, config_path):
     global UNCERTAINTY_ADAPTIVE_PARTICLES, UNCERTAINTY_NEFF_LOW_RATIO, UNCERTAINTY_NEFF_HIGH_RATIO
     global UNCERTAINTY_BOOST_FACTOR, UNCERTAINTY_SHRINK_FACTOR
     global UNCERTAINTY_PARTICLES_MIN, UNCERTAINTY_PARTICLES_MAX
+    global PF_MODE
 
     config_dir = config_path.parent
     config_name = str(config_path)
@@ -1709,6 +1758,35 @@ def apply_map_config(args, config, config_path):
     UNCERTAINTY_PARTICLES_MIN = int(adaptive.get("uncertainty_particles_min", 80))
     UNCERTAINTY_PARTICLES_MAX = int(adaptive.get("uncertainty_particles_max", 1200))
 
+    # [本研究独自] 固定粒子数PF(比較用の方式B)。3様態のパラメータを同じ値にそろえる。
+    # fixed_*はfixedのときだけ必須(adaptiveでは読まないので、既存のJSONはそのまま動く)。
+    pf_mode_arg = getattr(args, "pf_mode", None)
+    PF_MODE = pf_mode_arg if pf_mode_arg is not None else str(config.get("pf_mode", "adaptive"))
+    if PF_MODE not in {"adaptive", "fixed"}:
+        raise ValueError("pf_mode は 'adaptive' または 'fixed' を指定してください。")
+    if PF_MODE == "fixed":
+        if args.uncertainty_adaptive_particles:
+            raise ValueError(
+                "--pf-mode fixed と --uncertainty-adaptive-particles は併用できません"
+                "(固定粒子数PFは粒子数を一定に保つ比較条件のため)。"
+            )
+        fixed_particles_arg = getattr(args, "fixed_particles", None)
+        fixed_n = int(
+            fixed_particles_arg if fixed_particles_arg is not None
+            else require_config_value(adaptive, "fixed_particles", adaptive_name)
+        )
+        if fixed_n < 1:
+            raise ValueError("固定粒子数PFの粒子数は1以上にしてください。")
+        fixed_sigma_step = float(require_config_value(adaptive, "fixed_sigma_step_px", adaptive_name))
+        fixed_sigma_angle = np.deg2rad(
+            float(require_config_value(adaptive, "fixed_sigma_angle_deg", adaptive_name))
+        )
+        N_PARTICLES_STRAIGHT = N_PARTICLES_TURNING = N_PARTICLES_STOPPED = fixed_n
+        SIGMA_STEP_STRAIGHT = SIGMA_STEP_TURNING = SIGMA_STEP_STOPPED = fixed_sigma_step
+        SIGMA_ANGLE_STRAIGHT = SIGMA_ANGLE_TURNING = SIGMA_ANGLE_STOPPED = fixed_sigma_angle
+        # JSONで不確実性適応が既定ONでも、固定粒子数PFでは無効にする。
+        UNCERTAINTY_ADAPTIVE_PARTICLES = False
+
     # CSVフォルダの優先順位: --data-dir > 環境変数PDR_DATA_DIR > JSONのdata_dir。
     # JSONのdata_dirはMacのパスなので、Windows等では環境変数で上書きする(2026-09-18)。
     env_data_dir = os.environ.get("PDR_DATA_DIR")
@@ -1774,6 +1852,12 @@ def apply_map_config(args, config, config_path):
             if UNCERTAINTY_ADAPTIVE_PARTICLES else "無効"
         )
     )
+    if PF_MODE == "fixed":
+        logging.info(
+            "PF方式: 固定粒子数 (%d粒子, 歩幅ノイズ=%.2fpx, 方位ノイズ=%.1f度。"
+            "移動様態・不確実性によらず一定)",
+            N_PARTICLES_STRAIGHT, SIGMA_STEP_STRAIGHT, np.rad2deg(SIGMA_ANGLE_STRAIGHT),
+        )
 
 
 # [本研究独自] check_sensor_quality.py・pick_landmarks.py・verify_route_graph.pyの
@@ -1812,7 +1896,7 @@ def load_map_config_for_tool(map_config_path):
         auto_route_centerline_enabled=None, auto_route_centerline_simplify_px=None,
         uncertainty_adaptive_particles=None, uncertainty_neff_low_ratio=None,
         uncertainty_neff_high_ratio=None, uncertainty_boost_factor=None,
-        uncertainty_shrink_factor=None,
+        uncertainty_shrink_factor=None, pf_mode=None, fixed_particles=None,
         multi_hypothesis_routing_enabled=None, multi_hypothesis_routing_simplify_px=None,
         multi_hypothesis_branch_heading_sigma_deg=None,
         multi_hypothesis_branch_likelihood_sigma_deg=None,
@@ -2214,6 +2298,16 @@ class CSVHandler(FileSystemEventHandler):
             self.request_redraw(event.dest_path)
 
 
+def trajectory_output_dir():
+    """[本研究独自] 軌跡CSVの保存先(--trajectory-dir、未指定ならRESULTS_DIR)。"""
+    return RESULTS_DIR if args.trajectory_dir is None else args.trajectory_dir.expanduser()
+
+
+def pf_mode_tag():
+    """[本研究独自] 固定粒子数PFのときだけ出力ファイル名に付ける目印(既定では空文字)。"""
+    return f"_pf-fixed{N_PARTICLES_STRAIGHT}" if PF_MODE == "fixed" else ""
+
+
 def redraw_all_paths():
     global binary, binary_for_pf, dist_map, h, w, result_cache
     ax.clear()
@@ -2315,6 +2409,7 @@ def redraw_all_paths():
             behavior_history = cached_result.get('behavior_history', [])
             particle_count_history = cached_result.get('particle_count_history', [])
             step_timestamps = cached_result.get('step_timestamps', [])
+            pdr_positions = cached_result.get('pdr_positions', [])
             route_segment_index = cached_result.get('route_segment_index', 0)
             turn_pending = cached_result.get('turn_pending', False)
             file_start_x, file_start_y = cached_result.get(
@@ -2412,6 +2507,9 @@ def redraw_all_paths():
             behavior_history    = []
             particle_count_history = []
             step_timestamps     = []  # [本研究独自] estimated_positionsと1:1対応するtimestamp
+            # [本研究独自] 比較用の方式A(PDRのみ)の軌跡。step_timestampsと1:1対応。
+            pdr_positions       = []
+            pdr_x, pdr_y        = file_start_x, file_start_y
             # 曲がり検出はturn_pendingとして保持し、設定曲がり角へ
             # 到達した時だけ次の線分へ進む。
             route_segment_index = nearest_route_segment_index(
@@ -2620,6 +2718,13 @@ def redraw_all_paths():
                 particle_count_history.append(len(pf.particles))
                 step_timestamps.append(float(row['timestamp']))
 
+                # [本研究独自] 方式A(PDRのみ)。PFと同じ歩・同じ歩幅([SmartPDR])を、経路補正
+                # 前のセンサー方位(sensor_step_heading)で積算するだけ。地図もPFも使わず
+                # 乱数も消費しないので、PFの推定結果や結果PNGには影響しない。
+                pdr_x += step_px * np.cos(sensor_step_heading)
+                pdr_y += step_px * np.sin(sensor_step_heading)
+                pdr_positions.append((pdr_x, pdr_y))
+
             estimated_positions = pf.estimated_positions
             extinction_count = pf.extinction_count
 
@@ -2631,6 +2736,7 @@ def redraw_all_paths():
                 'behavior_history': behavior_history,
                 'particle_count_history': particle_count_history,
                 'step_timestamps': step_timestamps,
+                'pdr_positions': pdr_positions,
                 'route_segment_index': route_segment_index,
                 'turn_pending': turn_pending,
                 'start_position': (file_start_x, file_start_y),
@@ -2714,9 +2820,9 @@ def redraw_all_paths():
                         f"{Path(file_name).stem}_traj"
                         f"_{ROUTE_CONSTRAINT_MODE}-{ROUTE_SOURCE}"
                         f"_{args.heading_source}-{HEADING_CALIBRATION_MODE}"
-                        f"_seed-{seed_text}.csv"
+                        f"{pf_mode_tag()}_seed-{seed_text}.csv"
                     )
-                    traj_path = (RESULTS_DIR / traj_name).resolve()
+                    traj_path = (trajectory_output_dir() / traj_name).resolve()
                     traj_path.parent.mkdir(parents=True, exist_ok=True)
                     pd.DataFrame({
                         "timestamp": step_timestamps,
@@ -2725,19 +2831,53 @@ def redraw_all_paths():
                     }).to_csv(traj_path, index=False)
                     logging.info(f"  推定軌跡CSVを保存しました: {traj_path}")
 
+        # [本研究独自] --save-pdr-trajectory-csv指定時のみ、方式A(PDRのみ)の軌跡を保存する。
+        # PFの条件・シードによらないので、ファイル名にそれらは含めない。
+        if args.save_pdr_trajectory_csv:
+            if not pdr_positions or len(pdr_positions) != len(step_timestamps):
+                logging.warning(
+                    "  PDRのみの軌跡CSVを保存できません: 軌跡(%d件)とstep_timestamps(%d件)が"
+                    "対応していません。",
+                    len(pdr_positions), len(step_timestamps),
+                )
+            else:
+                pdr_arr = np.array(pdr_positions)
+                pdr_path = (
+                    trajectory_output_dir()
+                    / f"{Path(file_name).stem}_pdr_traj"
+                      f"_{args.heading_source}-{HEADING_CALIBRATION_MODE}.csv"
+                ).resolve()
+                pdr_path.parent.mkdir(parents=True, exist_ok=True)
+                pd.DataFrame({
+                    "timestamp": step_timestamps,
+                    "x_px": pdr_arr[:, 0],
+                    "y_px": pdr_arr[:, 1],
+                }).to_csv(pdr_path, index=False)
+                logging.info(
+                    "  PDRのみの軌跡CSVを保存しました: %s (最終位置 x=%.1f, y=%.1f)",
+                    pdr_path, pdr_arr[-1, 0], pdr_arr[-1, 1],
+                )
+
     end_overall = time.time()
-    logging.info("\n適応型パーティクルフィルタを使用")
+    fixed_pf = PF_MODE == "fixed"
+    logging.info(
+        f"\n固定粒子数パーティクルフィルタ({N_PARTICLES_STRAIGHT}粒子)を使用" if fixed_pf
+        else "\n適応型パーティクルフィルタを使用"
+    )
     logging.info(f"Overall time: {end_overall - start_overall:.2f} seconds")
 
     unc_tag = "+unc" if UNCERTAINTY_ADAPTIVE_PARTICLES else ""
     ax.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
     title = (
-        "移動様態適応型PF + SmartPDR "
+        (f"固定粒子数PF({N_PARTICLES_STRAIGHT}粒子)" if fixed_pf else "移動様態適応型PF")
+        + " + SmartPDR "
         f"（経路制約: {ROUTE_CONSTRAINT_MODE}/{ROUTE_SOURCE}{unc_tag}, 方位: {args.heading_source}）"
     )
     if japanize_matplotlib is None:
         title = (
-            "Behavior-adaptive PF + SmartPDR "
+            (f"Fixed-particle PF (N={N_PARTICLES_STRAIGHT})" if fixed_pf
+             else "Behavior-adaptive PF")
+            + " + SmartPDR "
             f"(route={ROUTE_CONSTRAINT_MODE}/{ROUTE_SOURCE}{unc_tag}, heading={args.heading_source})"
         )
     ax.set_title(title)
@@ -2759,7 +2899,7 @@ def redraw_all_paths():
         heading_tag = f"{args.heading_source}-{HEADING_CALIBRATION_MODE}"
         auto_name = (
             f"{timestamp}_route-{ROUTE_CONSTRAINT_MODE}-{ROUTE_SOURCE}{unc_tag}"
-            f"_head-{heading_tag}_seed-{seed_text}.png"
+            f"_head-{heading_tag}{pf_mode_tag()}_seed-{seed_text}.png"
         )
         save_path = (RESULTS_DIR / auto_name).resolve()
     save_path.parent.mkdir(parents=True, exist_ok=True)

@@ -9,6 +9,16 @@
     環境変数が未設定なら従来と同じ動作。kanri_4f・seed=42で`--data-dir`指定時と
     環境変数指定時の出力PNG(MD5)とログが完全一致し、入力CSVが不変であることを確認した。
 
+(1) [本研究独自] 卒論第7章の比較方式を本体から実行できるようにした(既定の動作は不変)。
+    `--save-pdr-trajectory-csv`: 方式A(PDRのみ)の軌跡を`--save-trajectory-csv`と同じ形式で
+    保存。PFと同じ歩・歩幅を経路補正前のセンサー方位で積算するだけで、乱数を使わない。
+    `--pf-mode fixed`(JSONの`pf_mode`でも可): 方式B(固定粒子数PF)。3様態の粒子数・ノイズを
+    `adaptive_pf.fixed_*`(kanri_4f.jsonに600粒子・0.7px・15度を追加)にそろえ、不確実性適応を
+    OFFにする。`--fixed-particles`で粒子数だけ上書きできる。固定時だけPNG・軌跡CSVの名前に
+    `_pf-fixed600`が付き、タイトルとログも変わる。`--trajectory-dir`: 軌跡CSVの保存先
+    (未指定なら従来どおりresults/)。方式とオプションの対応はREADME.md「比較方式と実行オプション」。
+    kanri_4f・seed=42の既定条件ほか3条件で修正前後のPNG(MD5)とログが完全一致、入力CSVは不変。
+
 ## 2026-09-03
 
 (0) data_dirのCSV探索が、計測アプリの派生CSVまでセンサーログとして拾っていた。

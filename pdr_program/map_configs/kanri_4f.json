@@ -45,6 +45,10 @@
   "turn_exit_threshold_deg": 6.0,
   "turn_yaw_rate_threshold_deg_s": 20.0,
 
-  "particle_resize_jitter_px": 0.5
+  "particle_resize_jitter_px": 0.5,
+
+  "fixed_particles": 600,
+  "fixed_sigma_step_px": 0.7,
+  "fixed_sigma_angle_deg": 15.0
 }
 }

@@ -55,6 +55,36 @@ PDR(歩行者自律測位)+移動様態適応型パーティクルフィルタ�
 - `measure_map_scale.py` — 地図上の既知区間をクリックしてscale_px_per_mを求める
 - `Lmap.py` — L字合成地図(`L_map.png`)を描画するツール(カレントディレクトリへ出力)
 
+## 比較方式と実行オプション(卒論第7章)
+
+評価ハーネス(`evaluation/run_evaluation.py`、作成予定)はこの表どおりに実行する。
+方式の定義は卒論雛形6.4、条件を決めた経緯は`../memo/comparison_methods.md`。
+
+**全方式に共通**: `--map-config map_configs/kanri_4f.json --no-watch --no-show --seed <1 7 42 100 777 2024>
+--save-trajectory-csv --trajectory-dir <条件ごとのフォルダ>`。方位の設定(`--heading-source`・
+`--heading-calibration-mode`)は全方式で同じにする。`--initial-heading-deg`は経路の向きで決める
+(east系は0、west_reverseは180)。
+
+| 方式 | 卒論 | 追加するオプション |
+|---|---|---|
+| A: PDRのみ | 7.1 | どれか1つのPF実行に`--save-pdr-trajectory-csv`を付ける。乱数を使わないので1通り |
+| B: 固定粒子数PF | 7.2 | `--route-constraint-mode none --pf-mode fixed`(600粒子・0.7px・15度、不確実性適応は自動でOFF) |
+| C: 移動様態適応PF | 7.3 | `--route-constraint-mode none --no-uncertainty-adaptive-particles` |
+| E: 提案方式 | 7.4 | `--route-source auto --route-constraint-mode enforce --uncertainty-adaptive-particles` |
+
+提案方式の変種(既定OFFの機能を1つずつONにする。提案方式の本体には含めない):
+
+| 変種 | 提案方式に足すオプション |
+|---|---|
+| 複数経路仮説 | `--multi-hypothesis-routing` |
+| 複数経路仮説+分岐選別尤度 | `--multi-hypothesis-routing --multi-hypothesis-branch-likelihood-sigma-deg 90` |
+| 広い部屋の除外 | `--auto-route-exclude-wide-rooms` |
+| 中心線による方位補正 | `--auto-route-centerline`(複数経路仮説とは併用不可) |
+
+- 方式BとCはどちらも連続壁尤度(`dist_map`)を使う。違いは様態適応の有無だけ。
+- 方式D(手動経路route_points)は比較に含めない。今の`route_points`は0805の経路用で、新しい経路とは合わない。
+- 分岐選別尤度のσ=90は、既存3本(調整用)で決めた値。`--multi-hypothesis-branch-heading-sigma-deg`は既定のまま(併用すると二重計上)。
+
 ## 計測一覧表(計測日に1枚書く)
 
 校正用と評価用の記録を1枚の表にまとめる。UTF-8でもExcelの既定保存(Shift-JIS)でもよい。
