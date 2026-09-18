@@ -1,8 +1,21 @@
-name: sato0608へミラーpush
+name: 相互ミラーpush(i22satou ⇔ sato0608)
+
+# このファイルは両方のリポジトリに同じ内容で置かれる(ミラーでコピーされるため)。
+# 実行中のリポジトリを見て、相手側へpushする。
+#   i22satou/i22satou で実行 → sato0608/graduation-research へ
+#   sato0608/graduation-research で実行 → i22satou/i22satou へ
+# 必要なSecret(それぞれのリポジトリに登録する):
+#   i22satou側: MIRROR_TOKEN = sato0608のPAT(graduation-researchへ書き込み可)
+#   sato0608側: MIRROR_TOKEN = i22satouのPAT(i22satouへ書き込み可)
+# 無限ループにはならない: 相手側のワークフローが戻しpushしても、同じコミットなので
+# 「Everything up-to-date」となり、新しいpushイベントは発生しない。
+# 両側で別々のコミットを積んだ場合は、force pushしないのでpushが拒否されて止まる(上書きはしない)。
 
 on:
   push:
     branches:
+      - "**"
+    tags:
       - "**"
 
 jobs:
@@ -15,8 +28,18 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      - name: sato0608/graduation-research へpush
+      - name: 相手側のリポジトリへpush
+        env:
+          MIRROR_TOKEN: ${{ secrets.MIRROR_TOKEN }}
         run: |
-          git remote add mirror "https://${{ secrets.MIRROR_TOKEN }}@github.com/sato0608/graduation-research.git"
-          git push mirror --all
-          git push mirror --tags
+          if [ "${GITHUB_REPOSITORY}" = "i22satou/i22satou" ]; then
+            TARGET="sato0608/graduation-research"
+          else
+            TARGET="i22satou/i22satou"
+          fi
+          if [ -z "${MIRROR_TOKEN}" ]; then
+            echo "Secret MIRROR_TOKEN が未登録のため、${TARGET} へのミラーをスキップする"
+            exit 0
+          fi
+          git remote add mirror "https://x-access-token:${MIRROR_TOKEN}@github.com/${TARGET}.git"
+          git push mirror "${GITHUB_REF}:${GITHUB_REF}"
