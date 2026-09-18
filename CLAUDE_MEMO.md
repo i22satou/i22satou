@@ -16,7 +16,7 @@ route_source=autoの検証中に見つかった1441/1442の謎)は、両方の�
 
 | ファイル | 扱っている内容 |
 |---|---|
-| [memo/route_source_auto.md](memo/route_source_auto.md) | route_source=auto(二値地図からの経路帯マスク自動抽出)の実装・none/manual/auto比較実験・L字マップでの第二検証環境の試み(不採用)・中心線抽出の実装と、通路/部屋境界を区別するexclude_wide_roomsの実装(6シード検証で全滅回数-16.8%・終点誤差-18.5%、既定OFF) |
+| [memo/route_source_auto.md](memo/route_source_auto.md) | route_source=auto(二値地図からの経路帯マスク自動抽出)の実装・none/manual/auto比較実験・L字マップでの第二検証環境の試み(不採用)・中心線抽出の実装と、通路/部屋境界を区別するexclude_wide_roomsの実装(6シード検証で全滅回数-16.8%・終点誤差-18.5%、既定OFF)。**決着済み・圧縮済み** |
 | [memo/uncertainty_particles.md](memo/uncertainty_particles.md) | 不確実性適応粒子数(§6.5)の実装・6シード検証・4パラメータの感度分析(初期値は妥当と確認) |
 | [memo/heading_calibration.md](memo/heading_calibration.md) | 方位の質のCSVごとの差・初期方位校正方式(samples/walking)・1438の逆走仮説の検定(棄却) |
 | [memo/step_length_calibration.md](memo/step_length_calibration.md) | ステップ検出の過検出(第2高調波)・歩幅の過小推定と校正ゲイン。**sensor_mysteryの1441/1442問題の答え** |
@@ -50,4 +50,4 @@ route_source=autoの検証中に見つかった1441/1442の謎)は、両方の�
 - **`.py`の変更履歴コメントと内容が重複するだけの記述は圧縮時に削ってよい**
   (「何を変えたか」は変更履歴側が正)。
 
-参照ルールは [CLAUDE.md](CLAUDE.md) の「Project policy」節を参照。
+参照ルールは [CLAUDE.md](CLAUDE.md) の「記録先と参照ルール」節を参照。

@@ -23,7 +23,7 @@ PDR(歩行者自律測位)+移動様態適応型パーティクルフィルタ�
   `from pdr_route_graph import (...)`により再importしているため、呼び出し側からは
   分割を意識せず`pdrmod.build_skeleton_graph(...)`のように呼べる。
 - **`CHANGELOG.md`** — `pdr_pf_improved.py`の変更履歴(旧: ファイル冒頭コメントに
-  あったものを2026-08-16に分離)。
+  あったものを2026-08-16に分離)。2026-09-02以前の項目は`CHANGELOG_archive.md`。
 
 ## 検証・診断ツール(`pdr_pf_improved.py`を呼び出す/流用する)
 
