@@ -68,9 +68,11 @@ import sys
 from pathlib import Path
 from statistics import mean
 
-SCRIPT_DIR = Path(__file__).resolve().parent
-PDR_SCRIPT = SCRIPT_DIR / "pdr_pf_improved.py"
-RESULTS_DIR = SCRIPT_DIR / "results"
+# このファイルはサブフォルダ(evaluation/・tools/)にあるため、本体・map_configs/・results/
+# のある1つ上のpdr_program/を基準にする(2026-09-18のフォルダ整理)。
+PROGRAM_DIR = Path(__file__).resolve().parent.parent
+PDR_SCRIPT = PROGRAM_DIR / "pdr_pf_improved.py"
+RESULTS_DIR = PROGRAM_DIR / "results"
 
 # map_configファイル名(.name)ごとの、終点x誤差評価に使う既知の実測終点x座標(px)。
 # kanri_4f.json用の800.0は、ユーザーが実測時の記憶から申告した点③付近での実際の
@@ -111,7 +113,7 @@ def run_condition(map_config, seed, heading_source, condition):
         cmd.append("--uncertainty-adaptive-particles")
     else:
         cmd.append("--no-uncertainty-adaptive-particles")
-    result = subprocess.run(cmd, capture_output=True, text=True, cwd=SCRIPT_DIR)
+    result = subprocess.run(cmd, capture_output=True, text=True, cwd=PROGRAM_DIR)
     if result.returncode != 0:
         print(f"[警告] 条件'{condition['label']}'の実行がエラー終了しました(returncode={result.returncode})", file=sys.stderr)
         print(result.stderr, file=sys.stderr)
@@ -157,7 +159,7 @@ def parse_log(log_text):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--map-config", type=Path, default=SCRIPT_DIR / "map_configs" / "kanri_4f.json")
+    parser.add_argument("--map-config", type=Path, default=PROGRAM_DIR / "map_configs" / "kanri_4f.json")
     parser.add_argument("--seed", type=int, default=42, help="単一シードのみ実行する場合(--seedsと併用不可)。")
     parser.add_argument(
         "--seeds", type=int, nargs="+", default=None,

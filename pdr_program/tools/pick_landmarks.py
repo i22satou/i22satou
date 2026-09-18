@@ -35,7 +35,7 @@
 #     正解位置CSVを作る。
 #
 # 【このスクリプトの使い方】
-#   python pick_landmarks.py --map-config map_configs/kanri_4f.json \
+#   python tools/pick_landmarks.py --map-config map_configs/kanri_4f.json \
 #       --landmarks-file ground_truth/kanri_4f_landmark_labels.csv
 #
 # landmarks-file(事前に用意する、目印のラベル一覧)の形式:
@@ -59,11 +59,13 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import pandas as pd
 
-SCRIPT_DIR = Path(__file__).resolve().parent
-sys.path.insert(0, str(SCRIPT_DIR))
+# このファイルはサブフォルダ(evaluation/・tools/)にあるため、本体・map_configs/・results/
+# のある1つ上のpdr_program/を基準にする(2026-09-18のフォルダ整理)。
+PROGRAM_DIR = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(PROGRAM_DIR))
 import pdr_pf_improved as pdrmod  # noqa: E402
 
-DEFAULT_OUTPUT_DIR = SCRIPT_DIR / "ground_truth"
+DEFAULT_OUTPUT_DIR = PROGRAM_DIR / "ground_truth"
 
 
 def load_map_binary(map_config_path):
@@ -111,7 +113,7 @@ def main():
         )
     )
     parser.add_argument("--map-config", type=Path,
-                         default=SCRIPT_DIR / "map_configs" / "kanri_4f.json",
+                         default=PROGRAM_DIR / "map_configs" / "kanri_4f.json",
                          help="地図設定JSON。表示する地図とピクセル座標系をこれで決める。")
     parser.add_argument("--landmarks-file", type=Path, required=True,
                          help="目印のラベル一覧CSV(label, point_type の2列。記載順=クリック順)。")

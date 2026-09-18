@@ -36,12 +36,12 @@
 
 ## 実行と確認
 
-すべて`pdr_program/`内で実行する。
+すべて`pdr_program/`内で実行する。本体は直下、検証・実験は`evaluation/`、準備・計測日の道具は`tools/`。
 
 ```bash
 cd pdr_program
 python pdr_pf_improved.py --map-config map_configs/kanri_4f.json --no-watch --no-show --seed 42
-python compare_route_source.py --seeds 1 7 42 100 777 2024
+python evaluation/compare_route_source.py --seeds 1 7 42 100 777 2024
 ```
 
 変更後は対象条件で実行し、(1)正常終了、(2)PNG保存、(3)入力CSV不変、(4)診断値・結果が意図せず変化していない、を確認して変更内容と検証結果を報告する。

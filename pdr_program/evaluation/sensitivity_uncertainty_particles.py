@@ -21,7 +21,7 @@
 """不確実性適応粒子数の4パラメータ(閾値2つ・倍率2つ)についてOFAT感度分析を行う。
 
 使用例:
-    python sensitivity_uncertainty_particles.py --seeds 1 7 42 100 777 2024
+    python evaluation/sensitivity_uncertainty_particles.py --seeds 1 7 42 100 777 2024
 """
 
 import argparse
@@ -36,7 +36,7 @@ from compare_route_source import (
     DEFAULT_EXPECTED_ENDPOINT_X,
     PDR_SCRIPT,
     RESULTS_DIR,
-    SCRIPT_DIR,
+    PROGRAM_DIR,
     parse_log,
 )
 
@@ -88,7 +88,7 @@ def run_combo(map_config, seed, heading_source, params):
     ]
     for axis, value in params.items():
         cmd += [CLI_FLAG[axis], str(value)]
-    result = subprocess.run(cmd, capture_output=True, text=True, cwd=SCRIPT_DIR)
+    result = subprocess.run(cmd, capture_output=True, text=True, cwd=PROGRAM_DIR)
     if result.returncode != 0:
         print(f"[警告] 実行がエラー終了しました(returncode={result.returncode})", file=sys.stderr)
         print(result.stderr, file=sys.stderr)
@@ -97,7 +97,7 @@ def run_combo(map_config, seed, heading_source, params):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--map-config", type=Path, default=SCRIPT_DIR / "map_configs" / "kanri_4f.json")
+    parser.add_argument("--map-config", type=Path, default=PROGRAM_DIR / "map_configs" / "kanri_4f.json")
     parser.add_argument("--seed", type=int, default=42, help="単一シードのみ実行する場合(--seedsと併用不可)。")
     parser.add_argument(
         "--seeds", type=int, nargs="+", default=None,

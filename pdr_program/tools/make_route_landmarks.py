@@ -27,14 +27,14 @@
 # 逆にして書けば、seqは並び順に1から振り直される。
 #
 # 【使い方】
-#   python make_route_landmarks.py --list
+#   python tools/make_route_landmarks.py --list
 #     -> 定義済みの経路と、各経路が現地採寸待ちの点を含むかを一覧する。
 #
-#   python make_route_landmarks.py --route rehearsal
+#   python tools/make_route_landmarks.py --route rehearsal
 #     -> ground_truth/kanri_4f_landmarks_rehearsal.csv と
 #        ground_truth/押す順番_rehearsal.md を生成する。
 #
-#   python make_route_landmarks.py --self-test
+#   python tools/make_route_landmarks.py --self-test
 #     -> 合成データで生成ロジックだけを確認する(実ファイル不要)。
 # ============================================================================
 
@@ -47,11 +47,13 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-SCRIPT_DIR = Path(__file__).resolve().parent
-DEFAULT_DIR = SCRIPT_DIR / "ground_truth"
+# このファイルはサブフォルダ(evaluation/・tools/)にあるため、本体・map_configs/・results/
+# のある1つ上のpdr_program/を基準にする(2026-09-18のフォルダ整理)。
+PROGRAM_DIR = Path(__file__).resolve().parent.parent
+DEFAULT_DIR = PROGRAM_DIR / "ground_truth"
 DEFAULT_MASTER = DEFAULT_DIR / "kanri_4f_landmarks_master.csv"
 DEFAULT_ROUTES = DEFAULT_DIR / "routes.json"
-DEFAULT_MAP_CONFIG = SCRIPT_DIR / "map_configs" / "kanri_4f.json"
+DEFAULT_MAP_CONFIG = PROGRAM_DIR / "map_configs" / "kanri_4f.json"
 
 MASTER_COLUMNS = ("id", "label", "point_type", "x_px", "y_px")
 OUTPUT_COLUMNS = ["seq", "label", "point_type", "x_px", "y_px"]

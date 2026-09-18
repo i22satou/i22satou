@@ -5,7 +5,8 @@ import numpy as np
 from PIL import Image
 
 
-BASE_DIR = Path(__file__).resolve().parent
+# このファイルはtools/にあるため、地図画像のある1つ上のpdr_program/を基準にする(2026-09-18のフォルダ整理)。
+BASE_DIR = Path(__file__).resolve().parent.parent
 IMAGE_PATH = BASE_DIR / "kanri_4f_binary_final3.png"
 
 

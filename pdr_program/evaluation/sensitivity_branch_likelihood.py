@@ -24,7 +24,7 @@
 """分岐仮説の選別尤度のσと初期方位校正方式を振って効果を測る。
 
 使用例:
-    python sensitivity_branch_likelihood.py --seeds 1 7 42 100 777 2024
+    python evaluation/sensitivity_branch_likelihood.py --seeds 1 7 42 100 777 2024
 """
 
 import argparse
@@ -36,7 +36,7 @@ from pathlib import Path
 from statistics import mean
 
 from compare_route_source import (
-    DEFAULT_EXPECTED_ENDPOINT_X, PDR_SCRIPT, RESULTS_DIR, SCRIPT_DIR, parse_log,
+    DEFAULT_EXPECTED_ENDPOINT_X, PDR_SCRIPT, RESULTS_DIR, PROGRAM_DIR, parse_log,
 )
 
 SIGMAS = [None, 15.0, 30.0, 60.0, 90.0]
@@ -54,7 +54,7 @@ def run_once(map_config, seed, sigma, heading_mode):
     ]
     if sigma is not None:
         cmd += ["--multi-hypothesis-branch-likelihood-sigma-deg", str(sigma)]
-    proc = subprocess.run(cmd, cwd=str(SCRIPT_DIR), capture_output=True, text=True)
+    proc = subprocess.run(cmd, cwd=str(PROGRAM_DIR), capture_output=True, text=True)
     if proc.returncode != 0:
         raise SystemExit(f"エラー: 実行に失敗しました(seed={seed}, σ={sigma})\n{proc.stderr[-2000:]}")
     return parse_log(proc.stderr + proc.stdout)
@@ -62,7 +62,7 @@ def run_once(map_config, seed, sigma, heading_mode):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--map-config", type=Path, default=SCRIPT_DIR / "map_configs" / "kanri_4f.json")
+    ap.add_argument("--map-config", type=Path, default=PROGRAM_DIR / "map_configs" / "kanri_4f.json")
     ap.add_argument("--seeds", type=int, nargs="+", default=[1, 7, 42, 100, 777, 2024])
     ap.add_argument("--sigmas", type=float, nargs="+", default=None,
                     help="選別尤度のσ[度]の一覧。0を含めると「無効」条件になる。")

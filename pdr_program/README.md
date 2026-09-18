@@ -25,26 +25,31 @@ PDR(歩行者自律測位)+移動様態適応型パーティクルフィルタ�
 - **`CHANGELOG.md`** — `pdr_pf_improved.py`の変更履歴(旧: ファイル冒頭コメントに
   あったものを2026-08-16に分離)。2026-09-02以前の項目は`CHANGELOG_archive.md`。
 
-## 検証・診断ツール(`pdr_pf_improved.py`を呼び出す/流用する)
+## 実行のしかた
 
-- `check_sensor_quality.py` — CSVごとの生センサーデータ品質を診断
-- `quick_check.py` — **計測当日その場で使う健全性判定**(歩数・歩調・平均歩幅・推定総距離・方位の正味回転・地点マークの整合)。撮り直しの要否をその場で決めるためのもの
-- `pick_landmarks.py` — 正解位置データ作成Phase 0の旧方式。**現在は使わない**(kanri_4fの二値地図は廊下沿いに開口が無くクリックできないため。詳細は`../memo/ground_truth.md`)
-- `verify_route_graph.py` — 通路グラフ(`build_skeleton_graph`/`simplify_skeleton_graph`)の可視化確認
+どのスクリプトも`pdr_program/`をカレントディレクトリにして実行する
+(例: `python evaluation/compare_route_source.py --seeds 1 7 42`)。
+サブフォルダのスクリプトは、本体・`map_configs/`・`results/`を1つ上の`pdr_program/`から探す。
+結果の保存先は、どのスクリプトも`pdr_program/results/`で共通(2026-09-18にフォルダを整理)。
+
+## `evaluation/` — 検証・実験(結果を出すもの)
+
 - `compare_route_source.py` — 経路制約モード・経路帯生成元の比較実験(サブプロセスで`pdr_pf_improved.py`を複数回実行)
 - `sensitivity_uncertainty_particles.py` — 不確実性適応粒子数パラメータの感度分析
-
-## 正解位置・精度評価ツール(独立、`pdr_pf_improved.py`を直接importしない)
-
-- `make_route_landmarks.py` — 正解位置データ作成Phase 0(現行方式)。目印のマスター表と経路定義から、経路別landmarks CSVと「押す順番シート」を生成
+- `sensitivity_branch_likelihood.py` — 分岐仮説の選別尤度σの感度分析
 - `build_ground_truth.py` — 正解位置データ作成Phase 2(waypoints×landmarksをseq結合)
 - `evaluate_accuracy.py` — 推定軌跡と正解位置からRMSE等を計算
+- `verify_route_graph.py` — 通路グラフ(`build_skeleton_graph`/`simplify_skeleton_graph`)の可視化確認
+- `check_sensor_quality.py` — CSVごとの生センサーデータ品質を診断
 
-## 地図準備ツール
+## `tools/` — 準備・計測日に使う道具
 
+- `quick_check.py` — **計測当日その場で使う健全性判定**(歩数・歩調・平均歩幅・推定総距離・方位の正味回転・地点マークの整合)。撮り直しの要否をその場で決めるためのもの
+- `make_route_landmarks.py` — 正解位置データ作成Phase 0(現行方式)。目印のマスター表と経路定義から、経路別landmarks CSVと「押す順番シート」を生成
+- `pick_landmarks.py` — 正解位置データ作成Phase 0の旧方式。**現在は使わない**(kanri_4fの二値地図は廊下沿いに開口が無くクリックできないため。詳細は`../memo/ground_truth.md`)
 - `map_binarizer.py` / `map_processing.py` — 建築平面図から2値地図を作る
 - `measure_map_scale.py` — 地図上の既知区間をクリックしてscale_px_per_mを求める
-- `Lmap.py` — L字合成地図(`L_map.png`)を描画するツール
+- `Lmap.py` — L字合成地図(`L_map.png`)を描画するツール(カレントディレクトリへ出力)
 
 ## データ
 

@@ -55,11 +55,13 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-SCRIPT_DIR = Path(__file__).resolve().parent
-sys.path.insert(0, str(SCRIPT_DIR))
+# このファイルはサブフォルダ(evaluation/・tools/)にあるため、本体・map_configs/・results/
+# のある1つ上のpdr_program/を基準にする(2026-09-18のフォルダ整理)。
+PROGRAM_DIR = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(PROGRAM_DIR))
 import pdr_pf_improved as pdrmod  # noqa: E402
 
-RESULTS_DIR = SCRIPT_DIR / "results"
+RESULTS_DIR = PROGRAM_DIR / "results"
 
 
 def analyze_csv(path, gyro_unit, turn_yaw_rate_threshold_rad):
@@ -122,7 +124,7 @@ def analyze_csv(path, gyro_unit, turn_yaw_rate_threshold_rad):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--map-config", type=Path, default=SCRIPT_DIR / "map_configs" / "kanri_4f.json")
+    parser.add_argument("--map-config", type=Path, default=PROGRAM_DIR / "map_configs" / "kanri_4f.json")
     parser.add_argument("--include-excluded", action="store_true",
                          help="exclude_csv設定で除外されているCSVも診断対象に含める。")
     args_cli = parser.parse_args()

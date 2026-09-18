@@ -6,6 +6,21 @@
 
 ---
 
+### 2026-09-18: pdr_program/を本体・evaluation/・tools/に分けた(ユーザー依頼)
+
+- 本体(`pdr_pf_improved.py`・`pdr_route_graph.py`)は**意図的に動かしていない**。本体は
+  `map_configs/`・`start_positions.csv`・`results/`を自分と同じフォルダから探すため、動かすと
+  パスの修正範囲が広がる。いつもの実行コマンドもそのまま使える。
+- 検証・実験(結果を出すもの)は`evaluation/`、準備・計測日の道具は`tools/`へ`git mv`した。
+  分類の基準は「結果を出すか、準備に使うか」。卒論で評価に使ったプログラムを説明しやすくするため。
+- 移動したスクリプトは`PROGRAM_DIR = Path(__file__).resolve().parent.parent`を基準にする
+  (旧`SCRIPT_DIR`)。結果の保存先は従来どおり`pdr_program/results/`で共通。
+- 確認: 移動前後で全スクリプトの`--help`・`--self-test`が通ること、`verify_route_graph.py
+  --simplify`の出力PNGがMD5で完全一致することを確認した。`evaluate_accuracy.py --self-test`
+  は`/tmp`に書き込むためWindowsでは移動前から失敗する(Mac前提、今回の整理とは無関係)。
+
+---
+
 ### 2026-09-03: results/のPNGを代表5枚だけ残して整理(ユーザー依頼)
 
 `pdr_program/results/`のPNGが123枚まで増えていたため、代表5枚を残し118枚を

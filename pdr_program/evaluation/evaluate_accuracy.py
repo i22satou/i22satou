@@ -28,10 +28,10 @@
 #     現時点では未使用)。
 #
 # 【使い方】
-#   python evaluate_accuracy.py --self-test
+#   python evaluation/evaluate_accuracy.py --self-test
 #     -> 合成データで計算ロジックが正しいかだけを確認する(実データ不要)。
 #
-#   python evaluate_accuracy.py \
+#   python evaluation/evaluate_accuracy.py \
 #     --estimated results/pdr_log_XXXX_trajectory.csv \
 #     --ground-truth path/to/ground_truth.csv \
 #     [--scale-px-per-m 11.4]

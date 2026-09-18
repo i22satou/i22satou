@@ -28,10 +28,10 @@
 # ここでは一切再実装しない(check_sensor_quality.py と同じ方針)。
 #
 # 【使い方】
-#   python quick_check.py <pdr_log_XXXX.csv> [--expected-distance-m 89.3]
+#   python tools/quick_check.py <pdr_log_XXXX.csv> [--expected-distance-m 89.3]
 #       [--expected-net-rotation-deg -90] [--landmarks ground_truth/..._east_std.csv]
-#   python quick_check.py --all          # data_dir の全CSVをまとめて判定
-#   python quick_check.py --self-test    # 合成データで判定ロジックだけ確認
+#   python tools/quick_check.py --all          # data_dir の全CSVをまとめて判定
+#   python tools/quick_check.py --self-test    # 合成データで判定ロジックだけ確認
 #
 # 経路の想定距離(make_route_landmarks.py の出力より):
 #   east_std 89.3 m / east_short 71.6 m / west_reverse 71.8 m / rehearsal 89.5 m
@@ -45,8 +45,10 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-SCRIPT_DIR = Path(__file__).resolve().parent
-sys.path.insert(0, str(SCRIPT_DIR))
+# このファイルはサブフォルダ(evaluation/・tools/)にあるため、本体・map_configs/・results/
+# のある1つ上のpdr_program/を基準にする(2026-09-18のフォルダ整理)。
+PROGRAM_DIR = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(PROGRAM_DIR))
 import pdr_pf_improved as pdrmod  # noqa: E402
 
 # 判定のしきい値。研究上の主張ではなく、その場で撮り直しを決めるための目安。
@@ -358,7 +360,7 @@ def main():
     p.add_argument("--all", action="store_true",
                    help="map-configのdata_dir内の全センサーログを判定する。")
     p.add_argument("--map-config", type=Path,
-                   default=SCRIPT_DIR / "map_configs" / "kanri_4f.json")
+                   default=PROGRAM_DIR / "map_configs" / "kanri_4f.json")
     p.add_argument("--expected-distance-m", type=float, default=None,
                    help="経路の想定歩行距離[m]。east_std=89.3 / east_short=71.6 など。")
     p.add_argument("--expected-net-rotation-deg", type=float, default=None,

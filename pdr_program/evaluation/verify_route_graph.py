@@ -29,7 +29,7 @@
 # 段階の出力を単体で目視確認するためのもの。
 #
 # 【使い方】
-#   python verify_route_graph.py --map-config map_configs/kanri_4f.json \
+#   python evaluation/verify_route_graph.py --map-config map_configs/kanri_4f.json \
 #       --save results/route_graph_check.png
 # ============================================================================
 
@@ -40,11 +40,13 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 
-SCRIPT_DIR = Path(__file__).resolve().parent
-sys.path.insert(0, str(SCRIPT_DIR))
+# このファイルはサブフォルダ(evaluation/・tools/)にあるため、本体・map_configs/・results/
+# のある1つ上のpdr_program/を基準にする(2026-09-18のフォルダ整理)。
+PROGRAM_DIR = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(PROGRAM_DIR))
 import pdr_pf_improved as pdrmod  # noqa: E402
 
-RESULTS_DIR = SCRIPT_DIR / "results"
+RESULTS_DIR = PROGRAM_DIR / "results"
 
 NODE_COLORS = {"junction": "#e63946", "endpoint": "#2a9d8f"}
 NODE_MARKERS = {"junction": "o", "endpoint": "s"}
@@ -95,7 +97,7 @@ def main():
         description="build_skeleton_graph()の結果(交差点・端点・エッジ)を地図に重ねて確認する。"
     )
     parser.add_argument("--map-config", type=Path,
-                         default=SCRIPT_DIR / "map_configs" / "kanri_4f.json")
+                         default=PROGRAM_DIR / "map_configs" / "kanri_4f.json")
     parser.add_argument("--save", type=Path, default=None,
                          help="保存先PNG。省略時はresults/以下へ自動命名で保存。")
     parser.add_argument("--exclude-wide-rooms", dest="exclude_wide_rooms",

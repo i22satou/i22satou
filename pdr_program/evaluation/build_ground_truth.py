@@ -30,7 +30,7 @@
 #     正解位置CSVを作る。
 #
 # 【このスクリプトの使い方】
-#   python build_ground_truth.py \
+#   python evaluation/build_ground_truth.py \
 #       --waypoints /path/to/pdr_log_XXXX_waypoints.csv \
 #       --landmarks ground_truth/kanri_4f_landmarks.csv \
 #       [--output ground_truth/pdr_log_XXXX_ground_truth.csv]
