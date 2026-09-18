@@ -37,6 +37,10 @@ PDR(歩行者自律測位)+移動様態適応型パーティクルフィルタ�
 - `compare_route_source.py` — 経路制約モード・経路帯生成元の比較実験(サブプロセスで`pdr_pf_improved.py`を複数回実行)
 - `sensitivity_uncertainty_particles.py` — 不確実性適応粒子数パラメータの感度分析
 - `sensitivity_branch_likelihood.py` — 分岐仮説の選別尤度σの感度分析
+- `calibrate_step_length.py` — 歩幅校正ゲイン(`step_length_calibration_gain`)の再同定。
+  計測一覧表の`calib`の行(距離既知の直線歩行)から全CSV共通のゲインを1つ求め、ファイル別の表・
+  leave-one-out・歩調と歩幅の図を`results/`へ出す。`--self-test`あり。JSONへの反映は手動
+- `measurement_list.py` — 計測一覧表(下記)を読む共通部品
 - `build_ground_truth.py` — 正解位置データ作成Phase 2(waypoints×landmarksをseq結合)
 - `evaluate_accuracy.py` — 推定軌跡と正解位置からRMSE等を計算
 - `verify_route_graph.py` — 通路グラフ(`build_skeleton_graph`/`simplify_skeleton_graph`)の可視化確認
@@ -50,6 +54,24 @@ PDR(歩行者自律測位)+移動様態適応型パーティクルフィルタ�
 - `map_binarizer.py` / `map_processing.py` — 建築平面図から2値地図を作る
 - `measure_map_scale.py` — 地図上の既知区間をクリックしてscale_px_per_mを求める
 - `Lmap.py` — L字合成地図(`L_map.png`)を描画するツール(カレントディレクトリへ出力)
+
+## 計測一覧表(計測日に1枚書く)
+
+校正用と評価用の記録を1枚の表にまとめる。UTF-8でもExcelの既定保存(Shift-JIS)でもよい。
+詳細は`evaluation/measurement_list.py`の冒頭。
+
+```
+file,purpose,route,distance_m,speed,use,memo
+calib/pdr_log_0925_1010.csv,calib,,30.0,slow,1,
+pdr_log_0925_1030.csv,eval,east_std,,,1,
+```
+
+- `purpose`: `calib`(歩幅校正用の直線歩行、`distance_m`と`speed`=slow/normal/fastを書く)/
+  `eval`(比較実験用、`route`=`ground_truth/kanri_4f_landmarks_<route>.csv`の`<route>`を書く)
+- `use`: 撮り直した記録は消さずに`0`にする
+- **校正用CSVはdata_dir直下に置かず、サブフォルダ(例: `calib/`)へ入れる**。直下に置くと、
+  本体が開始位置の登録を求めてクリック待ちで止まる
+- 例: `ground_truth/measurement_list_0805.csv`(既存3本。2.10の再現確認用)
 
 ## データ
 

@@ -1,0 +1,39 @@
+{
+  "created_at": "2026-09-18 12:40:29",
+  "tag": "0805check",
+  "git_commit": "5ce1622",
+  "git_uncommitted_changes": true,
+  "measurement_list": "C:\\Users\\satos\\i22satou\\pdr_program\\ground_truth\\measurement_list_0805.csv",
+  "data_dir": "G:\\マイドライブ\\PDR",
+  "map_config": "C:\\Users\\satos\\i22satou\\pdr_program\\map_configs\\kanri_4f.json",
+  "n_files": 3,
+  "files_by_speed": {
+    "unknown": 3
+  },
+  "recommended_gain": 2.317407256908879,
+  "recommended_method": "総距離一致(本体と同じクリップ込みの推定総距離の合計 = 歩いた距離の合計)",
+  "ratio_gain": 2.104666101319646,
+  "ratio_method": "総距離比(歩いた距離の合計 / ゲイン1での推定総距離の合計)。2.10と同じ求め方",
+  "current_gain_in_config": 2.1,
+  "step_clip_m": [
+    0.25,
+    1.0
+  ],
+  "pooled_total_error_pct": {
+    "recommended": 2.7572477134656586e-14,
+    "ratio": -6.489633612964151,
+    "current": -6.649631387834396
+  },
+  "leave_one_out": {
+    "gain_min": 2.100252741095418,
+    "gain_max": 3.1690908832992437,
+    "max_abs_dev_pct": 36.7515732873988,
+    "heldout_rms_error_pct": 26.564311144558246,
+    "heldout_max_abs_error_pct": 37.81896138286754
+  },
+  "leave_one_speed_out": null,
+  "outputs": {
+    "table": "C:\\Users\\satos\\i22satou\\pdr_program\\results\\20260918_124028_step_calibration_0805check.csv",
+    "figure": "C:\\Users\\satos\\i22satou\\pdr_program\\results\\20260918_124028_step_calibration_0805check.png"
+  }
+}
