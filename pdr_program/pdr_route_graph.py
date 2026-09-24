@@ -2,40 +2,10 @@
 # pdr_route_graph.py
 #
 # 【変更履歴】
-# - 2026-08-30: [本研究独自] 複数経路仮説PFの分岐選択を、完全一様乱択から
-#               直前の実測方位に近いエッジを優先するガウス重み付き乱択へ
-#               変更(edge_entry_heading/choose_branch_by_heading追加)。
-#               pdr_pf_improved.py側のコード増大を避けるため、方位計算を
-#               伴う純粋関数はこちらに置いた(呼び出し側の_advance_route_state
-#               は関数呼び出し1つに置き換わるだけで数行増に留まる)。
-# - 2026-08-16: [本研究独自] 新規作成。pdr_pf_improved.pyが3500行を超えて
-#               肥大化してきたため、経路帯マスク抽出・通路グラフ化(骨格化・
-#               ノード整理・トポロジー変換)関連の関数をこのファイルへ切り出した。
-#               関数の中身・ロジックは一切変更していない(コピーのみ)。
-#               pdr_pf_improved.py側は
-#               `from pdr_route_graph import (...)` で全関数を再importして
-#               いるため、pdr_pf_improved.py内の呼び出し箇所・
-#               他スクリプト(verify_route_graph.py等)からの
-#               `pdrmod.build_skeleton_graph(...)`のような呼び出し方は
-#               一切変更する必要がない。
-#
-#               分離にあたり、extract_ordered_centerline()内で参照していた
-#               pdr_pf_improved.py側のグローバル定数
-#               AUTO_ROUTE_CENTERLINE_MAX_DETOUR_RATIO(実行中に書き換わらない
-#               純粋な定数)は、この関数の引数max_detour_ratio(既定値2.5、
-#               従来の定数値と同じ)に変換した。呼び出し側は追加引数を渡して
-#               いないため既定値2.5が使われ、動作は従来と完全に同じ。
-#
-#               それ以外の関数(extract_auto_route_mask, _rdp_simplify,
-#               build_skeleton_graph, _prune_graph_spurs,
-#               _merge_close_junction_nodes, _collapse_pass_through_nodes,
-#               simplify_skeleton_graph, build_route_graph_topology,
-#               nearest_edge_position)はいずれも呼び出し元からの引数だけで
-#               完結しており(pdr_pf_improved.py側の可変なグローバル設定値
-#               ROUTE_HEADING_WEIGHT等には一切依存しない)、そのまま移動できた。
-#               なお、手動route_pointsから経路帯マスクを作るbuild_route_mask()は
-#               ROUTE_POINTS・ROUTE_WIDTH_PX(可変なグローバル設定値)に依存する
-#               ため、このファイルには移動せずpdr_pf_improved.py側に残している。
+# - 2026-08-30: [本研究独自] 複数経路仮説PFの分岐選択に方位重み付け
+#               (edge_entry_heading/choose_branch_by_heading)を追加。
+# - 2026-08-16: [本研究独自] pdr_pf_improved.pyから経路帯マスク抽出・通路グラフ化の
+#               関数を切り出して新規作成。詳細はCHANGELOG_archive.md。
 #
 # 【このファイルの位置づけ】
 # route_source=auto(二値地図から通路帯マスクを自動抽出する方式)に関する
@@ -69,8 +39,8 @@ from skimage.morphology import skeletonize
 # build_route_mask()が手動route_pointsを太らせるのに対し、こちらは座標を一切与えず
 # 「壁までの距離がmax_half_width_px以下の移動可能領域」を通路候補とみなし、そのうち
 # 最大の連結成分を通路網として採用する(広い部屋は距離が大きく候補から外れるため、
-# 廊下だけが概ね残る)。曲がり角に連動した方位補正(route_guidance_enabled系)は
-# 順序付きroute_pointsが前提のため、autoではまだ対応しない(空間的な経路帯制約のみ)。
+# 廊下だけが概ね残る)。曲がり角に連動した方位補正に使う順序付きの中心線は、
+# extract_ordered_centerline()で別に作る(既定OFF)。
 #
 # [本研究独自] ただし上記の「壁までの距離」だけの判定では、大きな部屋の壁際の帯
 # (片側は壁、反対側は広い部屋の内部)を、両側を壁に挟まれた本物の通路と区別できない
@@ -146,9 +116,7 @@ def extract_ordered_centerline(mask, simplify_tolerance_px, max_detour_ratio=2.5
     抽出できない場合は空リストを返す(呼び出し側はROUTE_POINTS=[]のまま、つまり
     方位補正が無効な従来挙動にフォールバックする)。
 
-    max_detour_ratioは下記の「輪」検出の閾値(既定2.5、元はpdr_pf_improved.pyの
-    定数AUTO_ROUTE_CENTERLINE_MAX_DETOUR_RATIOだったものをこの関数の引数に変換した。
-    呼び出し側で調整が必要になったことはなく、CLI/JSONには公開していない)。
+    max_detour_ratioは下記の「輪」検出の閾値(CLI/JSONには公開していない内部の安全弁)。
     """
     skeleton = skeletonize(mask)
     ys, xs = np.nonzero(skeleton)
@@ -198,23 +166,11 @@ def extract_ordered_centerline(mask, simplify_tolerance_px, max_detour_ratio=2.5
 
     points_xy = [(float(x), float(y)) for y, x in path]
 
-    # [本研究独自] マスクが「輪」状に連結して見える場合への安全装置。
-    # extract_auto_route_mask()の最大連結成分には、kanri_4f.jpgのように、2値化した
-    # 地図上では2本の帯が両端付近で連結して見える場合がある(2026-08-16、単体検証で
-    # 発見)。実際の建物平面図・壁検出結果(kanri_4f_preview_final3.png)と1px単位で
-    # 照合したところ、原因は2つの組み合わせだった: (1)高さの異なる西側廊下・東側廊下
-    # を繋ぐホール・階段(3Fへの階段)は実在する正しい接続、(2)もう一方は
-    # extract_auto_route_mask()が壁までの距離のみで通路候補を判定するため、大きな
-    # 部屋(電子工学実験室等)の壁際の帯を通路と区別できず、たまたま別の階段(屋外階段)
-    # の踊り場まで繋がって見えるだけの見せかけの経路だった。文字(部屋番号等)を壁と
-    # 誤認したことが原因ではない(壁検出結果を平面図と照合して正確だったことを確認
-    # 済み)。詳細はmemo/route_source_auto.md参照。理由の組み合わせによらず、
-    # このように連結して見える場合は木の直径探索が誤って輪をぐるっと回る経路を
-    # 「最も長い経路」として選んでしまうため、実際の経路長が始点・終点間の直線距離に
-    # 対して極端に長い(=大きく迂回している)場合はこの誤検出とみなし、抽出を諦めて
-    # 空リストを返す(呼び出し側は従来通りROUTE_POINTS=[]のまま、方位補正なしに
-    # フォールバックする)。通路と部屋の壁際を区別できるマスク生成方式への改良や、
-    # 分岐を含む通路網への正式対応(§6.2の通路グラフ)は今後の課題。
+    # [本研究独自] マスクが「輪」状に連結して見える場合への安全装置。kanri_4fでは、
+    # 大きな部屋の壁際の帯が別の階段の踊り場までつながり、2本の廊下が両端で輪になって
+    # 見える(memo/route_source_auto.md)。このとき木の直径探索は輪を回る経路を選んで
+    # しまうので、経路長が始点・終点間の直線距離に対して極端に長ければ誤検出とみなし、
+    # 空リストを返す(呼び出し側はROUTE_POINTS=[]のまま、方位補正なしで続ける)。
     path_xy = np.asarray(points_xy, dtype=float)
     path_length = float(np.sum(np.hypot(*np.diff(path_xy, axis=0).T)))
     straight_dist = float(np.hypot(*(path_xy[-1] - path_xy[0])))
@@ -272,16 +228,10 @@ def _rdp_simplify(points, epsilon):
     return [tuple(p) for p, k in zip(points, keep) if k]
 
 
-# [本研究独自] 通路グラフ化(進捗反映版メモ§23 Week1後半、5.3節・6.2節の完全版に
-# 向けた第一段階)。extract_ordered_centerline()が骨格全体から「最も長い1本の経路
-# (木の直径)」だけを選んで分岐を無視するのに対し、こちらは骨格の分岐点・端点を
-# すべてノードとして保持し、それらを結ぶ経路をエッジとするグラフを構築する。
-# 8近傍の骨格画素隣接構造(骨格画素の次数で分類する考え方)自体は
-# extract_ordered_centerline()と同じだが、目的が異なるため別関数として独立させて
-# おり、あちらの安全装置(迂回率チェック)やroute_source=autoの既定パイプラインには
-# まだ接続していない(既定の挙動は一切変更しない、検証専用の新関数)。
-# 将来、複数経路仮説(5.7節、進捗反映版メモ§23の次の優先タスク)で
-# 交差点(junctionノード)を検出する土台として使う想定。
+# [本研究独自] 通路グラフ化。extract_ordered_centerline()が骨格全体から「最も長い
+# 1本の経路(木の直径)」だけを選んで分岐を無視するのに対し、こちらは骨格の分岐点・
+# 端点をすべてノードとして保持し、それらを結ぶ経路をエッジとするグラフを構築する。
+# 複数経路仮説PF(--multi-hypothesis-routing、既定OFF)が交差点を扱う土台。
 def build_skeleton_graph(mask):
     """二値マスクを細線化(skeletonize)し、骨格画素を次数で分類してノード・エッジ
     のグラフを構築する。
@@ -654,9 +604,8 @@ def simplify_skeleton_graph(graph, min_spur_length_px=15.0, merge_junction_dista
 # 複数経路仮説PF: グラフのトポロジー変換(粒子単位のグラフ分岐PF方式)
 # ============================================================
 # 既存のROUTE_POINTS方式は、1本の折れ線を"区間インデックス"で順に辿りながら
-# 各区間の方位でセンサー方位を補正する(get_route_segment_heading等)。この考え方
-# 自体は分岐のない直線経路に対しては有効に機能している(kanri_4fで全滅回数
-# -16.8%・終点誤差-18.5%、CLAUDE.md参照)。複数経路仮説PFは、この"区間インデックス"
+# 各区間の方位でセンサー方位を補正する(get_route_segment_heading等)。
+# 複数経路仮説PFは、この"区間インデックス"
 # を経路全体で1つのスカラーとして共有するのではなく、粒子ごとに個別の
 # (エッジid, 区間インデックス, 進行方向)として持たせ、交差点に到達した粒子ごとに
 # 出口エッジを確率的に選ばせる(=粒子群が複数の経路仮説を自然に表現する)ことを
@@ -792,13 +741,12 @@ def edge_entry_heading(edge, direction):
 
 
 def choose_branch_by_heading(candidates, edges_by_id, reference_heading, sigma_rad):
-    """[本研究独自] 複数経路仮説PFの交差点分岐選択(2026-08-30、Week3+改善)。
+    """[本研究独自] 複数経路仮説PFの交差点分岐選択(2026-08-30)。
 
     候補(edge_id, direction)のうち、reference_heading(直前の実測方位)に
     近い方位で進入するエッジほど選ばれやすいガウス重み付き乱択で1つ選ぶ。
-    従来のnp.random.randintによる完全一様乱択(2026-08-16実装)を置き換える。
-    全候補の方位差が同程度ならほぼ一様乱択に近づくため、直進が明確な分岐では
-    正しい枝を優先しつつ、判断がつかない場合は従来通り確率的に探索する。
+    sigma_radが非常に大きいと一様乱択になる(本体の既定はσ=100000度で、
+    方位重み付けは一様乱択を上回らなかった。CHANGELOG_archive.md 2026-08-30)。
 
     candidates: [(edge_id, direction), ...] (逆走候補は呼び出し側で除外済みの
     前提。1件のみならそのまま返す)

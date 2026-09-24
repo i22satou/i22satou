@@ -4,6 +4,7 @@
 # 【変更履歴】
 # 全履歴はCHANGELOG.md。変更したらCHANGELOG.mdの先頭へ日付付きで1項目追加すること。
 # 直近のみ下記に残す(古い項目は消してよい):
+# - 2026-09-25: 未使用の定数・変数と古い経緯のコメントを削除(動作は不変)。
 # - 2026-09-24: [本研究独自] (1)曲がり終了のヨーレートしきい値を独立した設定値にした
 #               (adaptive_pf.turn_exit_yaw_rate_threshold_deg_s、--turn-exit-yaw-rate-
 #               threshold-deg-s)。校正用の直線歩行から evaluation/calibrate_turn_threshold.py
@@ -21,20 +22,7 @@
 #               の軌跡CSV(--save-pdr-trajectory-csv)、方式B(固定粒子数PF、--pf-mode fixed)、
 #               軌跡CSVの保存先指定(--trajectory-dir)。既定の動作は不変。
 #               方式とオプションの対応はREADME.md「比較方式」、詳細はCHANGELOG.md。
-# - 2026-09-02:PDR上流(距離・方位)の系統誤差を4点修正。(1)ステップ検出が歩行加速度
-#               の第2高調波に反応し歩数を約1.7〜1.8倍に過検出していた問題を、最短
-#               ピーク間隔を上限歩調ベース(MAX_STEP_FREQUENCY_HZ)へ変更して是正。
-#               (2)歩幅の約1/2過小推定へ校正ゲインSTEP_LENGTH_CALIBRATION_GAINを追加。
-#               (1)(2)は逆向きの誤差でファイルごとに異なる割合で相殺しており、
-#               memo/sensor_mystery.mdの1441/1442問題の真因だった。(3)PF重みの
-#               「方位ズレの重み」が提案分布の二重計上だったため削除。(4)初期方位校正に
-#               歩行開始基準(walking、既定OFF)を追加。(5)乱数シードのCSV独立化と、
-#               複数経路仮説PFの方位補正のroute_constraint_mode分岐。
-#               詳細はCHANGELOG.md 2026-09-02(1)〜(5)項。
-# - 2026-08-30: [本研究独自] 複数経路仮説PFの交差点分岐選択に方位重み付け
-#               (choose_branch_by_heading、pdr_route_graph.py)を追加したが、正解経路
-#               との照合で一様乱択を上回らず、既定を一様乱択相当(σ=100000)へ戻した。
-#               関数は--multi-hypothesis-branch-heading-sigma-degで再検討可能。
+# - それ以前はCHANGELOG.md・CHANGELOG_archive.md。
 #
 # 【既知開始位置の設定】
 # - 未登録のPDRデータは、地図上で実際の計測開始位置をクリックして指定する。
@@ -172,7 +160,7 @@
 #     ための実験基盤としての拡張。
 #   - 初期方位のセンサ→地図座標系への校正、方位推定方法(gyro/android)の選択、
 #     クリック開始位置に最も近い経路線分を初期線分として選ぶ処理など、
-#     pdr_pf_clickstart.pyには無い本ファイル固有の拡張(詳細は上部の変更履歴)。
+#     pdr_pf_clickstart.pyには無い本ファイル固有の拡張。
 #
 # 現状のroute_constraint_mode=prefer/enforceは正解に近い経路を手動入力した比較用
 # 方式(進捗メモでいう方式D相当)であり、本研究の最終提案方式そのものではない。
@@ -212,10 +200,8 @@ from scipy.signal import find_peaks
 from scipy import ndimage
 from PIL import Image
 
-# [本研究独自] 経路帯マスク抽出・通路グラフ化関連の関数群(2026-08-16、ファイル
-# 肥大化を受けてpdr_route_graph.pyへ切り出した)。関数の中身は移動前と完全に同じで、
-# ここで再importすることで、このファイル内・他スクリプトからの呼び出し方は
-# 従来通り(pdr_pf_improved.build_skeleton_graph(...)等)のまま変更していない。
+# [本研究独自] 経路帯マスク抽出・通路グラフ化関連の関数群(pdr_route_graph.py)。
+# 他スクリプトからもpdr_pf_improved.build_skeleton_graph(...)のように呼べるよう再importする。
 from pdr_route_graph import (
     extract_auto_route_mask,
     extract_ordered_centerline,
@@ -284,11 +270,6 @@ AUTO_ROUTE_EXCLUDE_WIDE_ROOMS_RADIUS_PX = None
 # みのこれまでの挙動を維持)。extract_ordered_centerline()参照。
 AUTO_ROUTE_CENTERLINE_ENABLED = False
 AUTO_ROUTE_CENTERLINE_SIMPLIFY_PX = 10.0
-# [本研究独自] 抽出した中心線の「始点・終点間の直線距離」に対する実経路長の比率が
-# これを超えたら、通路網がループ状で木の直径探索が誤った経路を選んだとみなし抽出を
-# 諦める(extract_ordered_centerline参照)。CLI/JSONでは調整不要な内部安全弁のため
-# 定数のまま(単純なL字・コの字程度の通路なら通常2倍を大きく超えない)。
-AUTO_ROUTE_CENTERLINE_MAX_DETOUR_RATIO = 2.5
 # [本研究独自] 複数経路仮説PF(粒子単位のグラフ分岐)。既定は無効。有効時は
 # route_source=autoの経路帯マスクからbuild_skeleton_graph()・
 # simplify_skeleton_graph()・build_route_graph_topology()で通路グラフを作り、
@@ -478,7 +459,6 @@ class PDRResultCache:
             pass
 
 
-
 def load_start_positions():
     """1つのCSVから、計測CSVごとの既知開始位置を読み込む。"""
     if not START_POSITION_FILE.exists():
@@ -636,7 +616,7 @@ def safe_read_csv(file_path, max_retries=5, delay=0.2):
     """ファイルへの同時書き込みによるパーサエラーやロック衝突を防ぎ、
     安全にCSVを読み込むためのリトライ機能付き関数。
     """
-    for i in range(max_retries):
+    for _ in range(max_retries):
         try:
             df = pd.read_csv(file_path)
             if not df.empty and len(df) > 1:
@@ -999,8 +979,6 @@ class ParticleFilterPDR:
         ただし壁尤度と経路帯マスクは、分岐先がどちらも通路であれば仮説を区別
         できない。そのための選別尤度が
         MULTI_HYPOTHESIS_BRANCH_LIKELIHOOD_SIGMA_DEG(2026-09-03、既定は無効)。
-        なお、ここでいう「方位整合度」による選別は2026-09-02(3)項で削除済みで、
-        2026-09-02以前のこのdocstringの記述は誤りだった。
         """
         edge_ids = self.particles[:, 2].astype(int)
         seg_indices = self.particles[:, 3].astype(int)
@@ -1097,10 +1075,10 @@ class ParticleFilterPDR:
         """
         ix = np.round(x).astype(int)
         iy = np.round(y).astype(int)
-        
+
         # マップ境界チェック
         out_of_bounds = (ix < 0) | (ix >= self.w) | (iy < 0) | (iy >= self.h)
-        
+
         in_wall = np.zeros_like(x, dtype=bool)
         valid = ~out_of_bounds
         if np.any(valid):
@@ -1116,17 +1094,17 @@ class ParticleFilterPDR:
         n = len(old_particles)
         x0, y0 = old_particles[:, 0], old_particles[:, 1]
         x1, y1 = new_particles[:, 0], new_particles[:, 1]
-        
+
         dx = x1 - x0
         dy = y1 - y0
-        
+
         # 1ピクセル以下でサンプリングするため、最大距離からステップ数を算出
         steps = np.maximum(np.abs(dx), np.abs(dy)).astype(int)
         steps = np.maximum(steps, 1)  # 最低でも1分割
-        
+
         hit = np.zeros(n, dtype=bool)
         max_steps = steps.max()
-        
+
         for s in range(max_steps + 1):
             ratio = s / np.maximum(steps, 1)
             xs = x0 + dx * ratio
@@ -1166,7 +1144,7 @@ class ParticleFilterPDR:
         # 3. 重み（尤度）の計算
         ny_idx = np.clip(np.round(new_particles[:, 1]).astype(int), 0, self.h - 1)
         nx_idx = np.clip(np.round(new_particles[:, 0]).astype(int), 0, self.w - 1)
-        
+
         # 距離画像による重み付け
         dist_values = self.dist_map[ny_idx, nx_idx]
         wall_weights = np.exp(
@@ -1210,15 +1188,10 @@ class ParticleFilterPDR:
         self.valid_ratio_history.append(float(np.mean(valid_particles)))
         spread = np.var(new_particles[:, 0]) + np.var(new_particles[:, 1])
         self.position_spread_history.append(float(spread))
-        
-        # [本研究独自] ここにあった「方位ズレの重み」は2026-09-02に削除した。
-        # p_angle = corrected_step_heading + noise_angle と定義した直後に
-        # angle_diff(p_angle, corrected_step_heading) をガウス密度で評価しており、
-        # これは noise_angle と恒等的に一致する = 提案分布の密度でそのサンプル自身を
-        # 重み付ける二重計上だった。観測情報を含まないので尤度として意味を持たず、
-        # 方位分散を sigma_angle/√2 へ縮め、Neffを約13%押し下げるだけだった。
-        # ブートストラップPFでは重みは観測尤度(壁尤度と経路帯マスク)のみであるべき。
-        # 再追加を検討する場合はCHANGELOG.md 2026-09-02(3)項の「今後の候補」を読むこと。
+
+        # 重みは観測尤度(壁尤度・経路帯マスク・分岐の選別尤度)だけにする。p_angleと
+        # 補正後の方位の差で重み付けると提案分布の二重計上になる(2026-09-02に削除した
+        # 「方位ズレの重み」。再検討するときはCHANGELOG_archive.md 2026-09-02(3)項を読む)。
 
         # 壁に当たったものは即座に重み0
         weights[hit_wall] = 0.0
@@ -1976,12 +1949,7 @@ def apply_map_config(args, config, config_path):
 # ような、PF本体を実行せずload_map_config()/apply_map_config()/
 # load_preprocessed_map()等だけを再利用したい読み取り専用の検証・診断スクリプトが
 # 共通で使う、最小構成のargs.Namespace(通称fake_args)を組み立てるヘルパー。
-#
-# 【経緯】以前はこのfake_args構築コードを3つのスクリプトへ個別にコピーしており、
-# apply_map_config()が参照するargs属性が増えるたび(exclude_wide_rooms追加時、
-# 複数経路仮説PF追加時)に3箇所とも同じAttributeErrorで落ちる不具合を2回繰り返した
-# (2026-08-16)。ここに1箇所へまとめることで、今後apply_map_config()の参照属性が
-# 増えてもここだけ直せばよくなる(3スクリプト側は変更不要)。
+# apply_map_config()が参照するargs属性を増やしたら、ここにも足す。
 #
 # fake_argsの各属性をNoneにする意味は、pdr_pf_improved.py本体のCLI引数と同じ
 # 「未指定ならJSON設定値をそのまま使う」。地図座標系・設定値だけが必要な
@@ -2339,14 +2307,6 @@ def build_route_mask(shape):
     return ndimage.binary_dilation(mask, structure=disk)
 
 
-# [本研究独自] 経路帯マスク抽出・通路グラフ化(骨格化・ノード整理・トポロジー化)
-# 関連の関数は、ファイル肥大化(3500行超)を受けてpdr_route_graph.pyへ切り出した
-# (2026-08-16)。extract_auto_route_mask/extract_ordered_centerline/
-# build_skeleton_graph/simplify_skeleton_graph/build_route_graph_topology/
-# nearest_edge_positionは、いずれも冒頭のimportで再importしているため、
-# このファイル内では従来通りそのまま(プレフィックス無しで)呼び出せる。
-
-
 # グローバルな描画・監視状態
 redraw_requested = threading.Event()
 result_cache = PDRResultCache()
@@ -2564,7 +2524,6 @@ def redraw_all_paths():
             step_indices, valley_indices = detect_steps_smartpdr(
                 df['step_acc'], sampling_rate_hz
             )
-            valley_by_step = dict(zip(step_indices, valley_indices))
 
             duration_sec = float(df['timestamp'].iloc[-1] - df['timestamp'].iloc[0])
             cadence_text = (
@@ -2583,7 +2542,6 @@ def redraw_all_paths():
                     estimate_smartpdr_step_length_px(df['step_acc'], peak, valley)
                     for peak, valley in zip(step_indices, valley_indices)
                 ]
-                raw_total_dist = sum(raw_step_lengths)
                 step_lengths = [length * args.step_gain for length in raw_step_lengths]
                 step_length_by_step = dict(zip(step_indices, step_lengths))
                 total_dist = sum(step_lengths)
@@ -2618,7 +2576,6 @@ def redraw_all_paths():
             )
 
             gyro_angle          = 0.0
-            heading             = 0.0
             heading_history     = np.zeros(len(df))
             yaw_rate_history    = np.zeros(len(df))
             step_set            = set(step_indices)
@@ -2669,7 +2626,7 @@ def redraw_all_paths():
                     madgwick = Madgwick(frequency=fs)
                 else:
                     madgwick = Madgwick()
-            
+
             Q = np.tile([1., 0., 0., 0.], (len(df), 1)) if HAS_AHRS else None
             step_count = 0
 
@@ -2734,12 +2691,8 @@ def redraw_all_paths():
                     continue
 
                 step_count += 1
-                valley_idx = valley_by_step.get(i, i)
-                step_px = step_length_by_step.get(
-                    i,
-                    estimate_smartpdr_step_length_px(df['step_acc'], i, valley_idx),
-                )
-                
+                step_px = step_length_by_step[i]
+
                 prev_step = 0
                 if step_count >= 2:
                     prev_step = step_indices[
@@ -2748,7 +2701,7 @@ def redraw_all_paths():
 
                 segment_heading = heading_history[prev_step:i + 1]
                 step_heading = weighted_angle_mean(segment_heading, np.ones(len(segment_heading)))
-                
+
                 # 1. センサー方位を使って移動様態を先に判定する。
                 #    経路補正後の方位で判定すると、実際の曲がりが水平経路へ
                 #    引き戻されるため、必ず補正前に判定する。
@@ -2833,7 +2786,7 @@ def redraw_all_paths():
                     np.rad2deg(yaw_rate_history[i]),
                 )
 
-                # 4. 移動様態に応じて粒子数・歩幅分散・方位分散を切り替えてPF更新。
+                # 5. 移動様態に応じて粒子数・歩幅分散・方位分散を切り替えてPF更新。
                 pf_update_start_time = time.perf_counter()
                 pf.update(step_px, step_heading, current_behavior)
                 pf_update_seconds.append(time.perf_counter() - pf_update_start_time)
@@ -2956,9 +2909,7 @@ def redraw_all_paths():
                         len(estimated_positions),
                     )
                 else:
-                    # 実行条件をファイル名に含める(2026-09-02)。従来は
-                    # "{CSV名}_trajectory.csv"固定で、条件やシードを変えて実行すると
-                    # 黙って上書きされ、条件間の比較ができなかった。
+                    # 条件やシードを変えた実行で上書きしないよう、実行条件をファイル名に含める。
                     seed_text = "none" if args.seed is None else str(args.seed)
                     traj_name = (
                         f"{Path(file_name).stem}_traj"
@@ -3038,8 +2989,7 @@ def redraw_all_paths():
     else:
         timestamp = time.strftime("%Y%m%d_%H%M%S")
         seed_text = "none" if args.seed is None else str(args.seed)
-        # 方位源と初期方位校正方式もファイル名へ含める(2026-09-02追加)。これらを
-        # 変えた実行が同名パターンになり、掃引結果のPNGを後から区別できなかったため。
+        # 方位源と初期方位校正方式もファイル名へ含め、条件を変えた実行を区別できるようにする。
         heading_tag = f"{args.heading_source}-{HEADING_CALIBRATION_MODE}"
         auto_name = (
             f"{timestamp}_route-{ROUTE_CONSTRAINT_MODE}-{ROUTE_SOURCE}{unc_tag}"
