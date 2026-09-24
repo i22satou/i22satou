@@ -4,6 +4,13 @@
 # 【変更履歴】
 # 全履歴はCHANGELOG.md。変更したらCHANGELOG.mdの先頭へ日付付きで1項目追加すること。
 # 直近のみ下記に残す(古い項目は消してよい):
+# - 2026-09-24: [本研究独自] (1)曲がり終了のヨーレートしきい値を独立した設定値にした
+#               (adaptive_pf.turn_exit_yaw_rate_threshold_deg_s、--turn-exit-yaw-rate-
+#               threshold-deg-s)。校正用の直線歩行から evaluation/calibrate_turn_threshold.py
+#               で決める。kanri_4f.jsonは従来と同じ10.0なので結果は不変。(2)全滅からの復帰を、
+#               移動前の平均の周りではなく「移動前の平均+この歩の移動量」の周りへまき直す
+#               ようにした(壁を通り抜けずに届く位置が足りなければ従来どおり)。全滅が起きた
+#               記録の結果は変わる。詳細はCHANGELOG.md。
 # - 2026-09-18: [本研究独自] 卒論第7章の比較方式を実行できるようにした。方式A(PDRのみ)
 #               の軌跡CSV(--save-pdr-trajectory-csv)、方式B(固定粒子数PF、--pf-mode fixed)、
 #               軌跡CSVの保存先指定(--trajectory-dir)。既定の動作は不変。
@@ -323,6 +330,15 @@ BEHAVIOR_WINDOW_SEC = 1.5
 TURN_ENTER_THRESHOLD = np.deg2rad(20.0)
 TURN_EXIT_THRESHOLD = np.deg2rad(6.0)
 TURN_YAW_RATE_THRESHOLD = np.deg2rad(20.0)
+# [本研究独自] 曲がり終了のヨーレートしきい値(直近1.5秒のヨーレート75パーセンタイルが
+# これ未満で、方位変化もTURN_EXIT_THRESHOLD未満なら直進へ戻る)。2026-09-24までは
+# TURN_YAW_RATE_THRESHOLDの半分(10度/秒)に固定していたが、まっすぐ歩いていても歩行の
+# 揺れで75パーセンタイルは18〜20度/秒あり(0805の1441・1442)、10度/秒を下回る歩は1〜3%
+# しかなかった。そのため一度曲がりと判定されると戻らず、歩の81〜99%が曲がり判定だった
+# (memo/comparison_methods.md)。値は評価用データではなく、校正用の直線歩行(計測一覧表の
+# calib)の揺れから evaluation/calibrate_turn_threshold.py で決め、JSONの
+# adaptive_pf.turn_exit_yaw_rate_threshold_deg_s に書く。JSONに無ければ従来どおり半分の値。
+TURN_EXIT_YAW_RATE_THRESHOLD = np.deg2rad(10.0)
 PARTICLE_RESIZE_JITTER_PX = 0.50
 
 # [本研究独自] 不確実性適応粒子数。移動様態(直進/曲がり/滞留)による粒子数決定
@@ -651,29 +667,12 @@ def behavior_parameters(behavior):
     }
 
 
-# [先行研究:移動様態PF]をベースに、[本研究独自]の外れ値対策(75パーセンタイル)・
-# AND条件・ヒステリシスを追加した屈折判定。原論文は「8秒間に30度以上変化したら
-# 屈折」という単純な閾値判定のみで、ヨーレートの併用やヒステリシスは持たない。
-def detect_move_behavior(
-    timestamps,
-    heading_history,
-    yaw_rate_history,
-    current_index,
-    previous_behavior,
-    step_detected,
-):
-    """方位変化と持続的なヨーレートから移動様態を判定する。
-
-    一瞬の手ぶれやジャイロの外れ値だけでTURNINGにならないよう、
-    直近区間のヨーレート最大値ではなく75パーセンタイルを用いる。
-
-    STRAIGHTからTURNINGへ移るには、方位変化とヨーレートの
-    両条件を満たす必要がある。TURNINGからSTRAIGHTへ戻る際は、
-    両方が十分小さくなったことを確認するヒステリシス判定を行う。
-    """
-    if not step_detected:
-        return MoveBehavior.STOPPED
-
+# [本研究独自] 移動様態判定に使う2つの量(直近BEHAVIOR_WINDOW_SEC秒の方位変化と、
+# ヨーレート絶対値の75パーセンタイル)を求める。detect_move_behavior()と、曲がり終了の
+# しきい値を校正用の直線歩行から決める evaluation/calibrate_turn_threshold.py の両方が
+# この関数を使う(同じ計算を二重に書かないため。2026-09-24に切り出した)。
+def behavior_window_stats(timestamps, heading_history, yaw_rate_history, current_index):
+    """(方位変化の絶対値[rad], ヨーレート絶対値の75パーセンタイル[rad/s])を返す。"""
     current_time = float(timestamps[current_index])
     start_index = current_index
 
@@ -700,12 +699,43 @@ def detect_move_behavior(
         )
     else:
         representative_yaw_rate = 0.0
+    return heading_change, representative_yaw_rate
+
+
+# [先行研究:移動様態PF]をベースに、[本研究独自]の外れ値対策(75パーセンタイル)・
+# AND条件・ヒステリシスを追加した屈折判定。原論文は「8秒間に30度以上変化したら
+# 屈折」という単純な閾値判定のみで、ヨーレートの併用やヒステリシスは持たない。
+# 曲がり終了のヨーレートしきい値は、校正用の直線歩行の揺れから決める
+# (TURN_EXIT_YAW_RATE_THRESHOLDのコメント参照)。
+def detect_move_behavior(
+    timestamps,
+    heading_history,
+    yaw_rate_history,
+    current_index,
+    previous_behavior,
+    step_detected,
+):
+    """方位変化と持続的なヨーレートから移動様態を判定する。
+
+    一瞬の手ぶれやジャイロの外れ値だけでTURNINGにならないよう、
+    直近区間のヨーレート最大値ではなく75パーセンタイルを用いる。
+
+    STRAIGHTからTURNINGへ移るには、方位変化とヨーレートの
+    両条件を満たす必要がある。TURNINGからSTRAIGHTへ戻る際は、
+    両方が十分小さくなったことを確認するヒステリシス判定を行う。
+    """
+    if not step_detected:
+        return MoveBehavior.STOPPED
+
+    heading_change, representative_yaw_rate = behavior_window_stats(
+        timestamps, heading_history, yaw_rate_history, current_index
+    )
 
     if previous_behavior == MoveBehavior.TURNING:
         turn_finished = (
             heading_change < TURN_EXIT_THRESHOLD
             and representative_yaw_rate
-            < TURN_YAW_RATE_THRESHOLD * 0.5
+            < TURN_EXIT_YAW_RATE_THRESHOLD
         )
         if turn_finished:
             return MoveBehavior.STRAIGHT
@@ -775,6 +805,10 @@ class ParticleFilterPDR:
         self.pos_buffer = collections.deque(maxlen=self.params.get('smooth_window', 2))
         self.estimated_positions = []
         self.extinction_count = 0
+        # [本研究独自] 全滅からの復帰で、この歩の移動量だけ進めた位置へまき直せた回数と、
+        # 足りずに移動前の位置へまき直した回数(2026-09-24、update()参照)。
+        self.recovery_moved_count = 0
+        self.recovery_fallback_count = 0
         self.route_ratio_history = []
         # [本研究独自] 分岐仮説の選別尤度における、区間方位とセンサー方位の
         # 平均ずれ(度)。尤度が実際に効いているかを確認するための診断値。
@@ -1009,6 +1043,36 @@ class ParticleFilterPDR:
         self.particles[:, 3] = new_seg_indices
         self.particles[:, 4] = new_directions
 
+    def _scatter_for_recovery(self, center_x, center_y, origin=None):
+        """全滅からの復帰用に、中心の周りへ粒子をまいた位置(x配列, y配列)を返す。
+
+        通行可能な画素(enforceでは経路帯の中)にある粒子が1/4を超える配置が見つかるまで
+        最大50回まき直し、無効な粒子は有効な粒子の位置で置き換える。見つからなければNone。
+        originを与えたときは、originから壁を通り抜けずに届く粒子だけを有効とする。
+        """
+        sigma = self.params['recovery_sigma']
+        n = self.n_particles
+        for _ in range(50):
+            new_x = center_x + np.random.normal(0, sigma, n)
+            new_y = center_y + np.random.normal(0, sigma, n)
+            nx_i = np.clip(np.round(new_x).astype(int), 0, self.w - 1)
+            ny_i = np.clip(np.round(new_y).astype(int), 0, self.h - 1)
+            valid = self.binary_for_pf[ny_i, nx_i] == 255
+            if ROUTE_CONSTRAINT_MODE == "enforce":
+                valid &= self.route_mask[ny_i, nx_i]
+            if origin is not None:
+                start = np.tile(np.asarray(origin, dtype=float), (n, 1))
+                valid &= ~self.path_hits_wall(start, np.column_stack([new_x, new_y]))
+            if valid.sum() > n // 4:
+                valid_idx = np.where(valid)[0]
+                invalid_idx = np.where(~valid)[0]
+                if len(invalid_idx) > 0:
+                    fill = np.random.choice(valid_idx, size=len(invalid_idx))
+                    new_x[invalid_idx] = new_x[fill]
+                    new_y[invalid_idx] = new_y[fill]
+                return new_x, new_y
+        return None
+
     def is_in_wall(self, x, y):
         """座標が壁の中、または地図範囲外にあるかを判定する（境界条件の厳格化）。
         範囲外は全て壁（移動不可）として安全に処理します。
@@ -1156,34 +1220,36 @@ class ParticleFilterPDR:
             # seg_index, direction)の5列になっているため、位置(x, y)の平均は
             # 先頭2列だけを使う。
             ref_x, ref_y = np.mean(self.particles[:, :2], axis=0)
-            self.particles[:, 0] = ref_x + np.random.normal(0, self.params['recovery_sigma'], self.n_particles)
-            self.particles[:, 1] = ref_y + np.random.normal(0, self.params['recovery_sigma'], self.n_particles)
-
-            for _ in range(50):
-                new_x = ref_x + np.random.normal(0, self.params['recovery_sigma'], self.n_particles)
-                new_y = ref_y + np.random.normal(0, self.params['recovery_sigma'], self.n_particles)
-                nx_i = np.clip(np.round(new_x).astype(int), 0, self.w - 1)
-                ny_i = np.clip(np.round(new_y).astype(int), 0, self.h - 1)
-                valid = self.binary_for_pf[ny_i, nx_i] == 255
-                if ROUTE_CONSTRAINT_MODE == "enforce":
-                    valid &= self.route_mask[ny_i, nx_i]
-                if valid.sum() > self.n_particles // 4:
-                    valid_idx = np.where(valid)[0]
-                    invalid_idx = np.where(~valid)[0]
-                    if len(invalid_idx) > 0:
-                        fill = np.random.choice(valid_idx, size=len(invalid_idx))
-                        new_x[invalid_idx] = new_x[fill]
-                        new_y[invalid_idx] = new_y[fill]
-                    self.particles[:, 0] = new_x
-                    self.particles[:, 1] = new_y
-                    break
-            # [本研究独自] 複数経路仮説PF: リカバリで全粒子がref_x, ref_y付近へ
+            # [本研究独自] 2026-09-24: 復帰の中心を「移動前の平均+この歩の移動量」にした。
+            # 従来は移動前の平均の周りへまき直していたため、全滅1回ごとにその歩の移動
+            # (約0.8m)が消え、全滅の多い方式・記録ほど軌跡が短くなっていた
+            # (0805の1438では方式B・Cで約8m)。移動量は各粒子が提案した移動の平均。
+            # 移動後の中心が壁の向こう側に出る場合があるので、移動前の平均から壁を通り
+            # 抜けずに届く位置だけを有効とする。そこに有効な位置が足りなければ、
+            # 従来どおり移動前の平均の周りへまき直す。
+            move_x, move_y = np.mean(new_particles[:, :2] - self.particles[:, :2], axis=0)
+            moved = self._scatter_for_recovery(
+                ref_x + move_x, ref_y + move_y, origin=(ref_x, ref_y)
+            )
+            if moved is not None:
+                self.particles[:, 0], self.particles[:, 1] = moved
+                center_x, center_y = ref_x + move_x, ref_y + move_y
+                self.recovery_moved_count += 1
+            else:
+                self.particles[:, 0] = ref_x + np.random.normal(0, self.params['recovery_sigma'], self.n_particles)
+                self.particles[:, 1] = ref_y + np.random.normal(0, self.params['recovery_sigma'], self.n_particles)
+                fallback = self._scatter_for_recovery(ref_x, ref_y)
+                if fallback is not None:
+                    self.particles[:, 0], self.particles[:, 1] = fallback
+                center_x, center_y = ref_x, ref_y
+                self.recovery_fallback_count += 1
+            # [本研究独自] 複数経路仮説PF: リカバリで全粒子が復帰の中心付近へ
             # テレポートしたため、edge_id/seg_index/directionも新しい位置に
             # 合わせて再割り当てする(古いエッジ情報を持ち越すと、以後
             # _advance_route_state()がそのエッジの終点へ辿り着くまで方位補正が
             # 実際の位置と無関係な値のままになってしまうため)。
             if self.route_topology is not None:
-                self.initialize_route_state(ref_x, ref_y, step_heading)
+                self.initialize_route_state(center_x, center_y, step_heading)
             self.weights = np.full(self.n_particles, 1.0 / self.n_particles)
 
         # 5. 重み付き平均による現在位置の推定（移動平均で平滑化）
@@ -1474,6 +1540,15 @@ def parse_args():
         ),
     )
     parser.add_argument(
+        "--turn-exit-yaw-rate-threshold-deg-s", type=float, default=None,
+        help=(
+            "[本研究独自] 曲がり終了のヨーレートしきい値(度/秒)。直近1.5秒のヨーレート75%%値が"
+            "これ未満(かつ方位変化が終了しきい値未満)なら直進へ戻る。JSONの"
+            "adaptive_pf.turn_exit_yaw_rate_threshold_deg_sを上書きする。値は校正用の直線歩行"
+            "からevaluation/calibrate_turn_threshold.pyで決める。"
+        ),
+    )
+    parser.add_argument(
         "--fixed-particles", type=int, default=None,
         help="--pf-mode fixedの粒子数。JSONのadaptive_pf.fixed_particlesを上書きする(感度分析用)。",
     )
@@ -1574,7 +1649,7 @@ def apply_map_config(args, config, config_path):
     global SIGMA_STEP_STRAIGHT, SIGMA_STEP_TURNING, SIGMA_STEP_STOPPED
     global SIGMA_ANGLE_STRAIGHT, SIGMA_ANGLE_TURNING, SIGMA_ANGLE_STOPPED
     global BEHAVIOR_WINDOW_SEC, TURN_ENTER_THRESHOLD, TURN_EXIT_THRESHOLD
-    global TURN_YAW_RATE_THRESHOLD, PARTICLE_RESIZE_JITTER_PX
+    global TURN_YAW_RATE_THRESHOLD, TURN_EXIT_YAW_RATE_THRESHOLD, PARTICLE_RESIZE_JITTER_PX
     global UNCERTAINTY_ADAPTIVE_PARTICLES, UNCERTAINTY_NEFF_LOW_RATIO, UNCERTAINTY_NEFF_HIGH_RATIO
     global UNCERTAINTY_BOOST_FACTOR, UNCERTAINTY_SHRINK_FACTOR
     global UNCERTAINTY_PARTICLES_MIN, UNCERTAINTY_PARTICLES_MAX
@@ -1729,6 +1804,18 @@ def apply_map_config(args, config, config_path):
     TURN_ENTER_THRESHOLD = np.deg2rad(float(require_config_value(adaptive, "turn_enter_threshold_deg", adaptive_name)))
     TURN_EXIT_THRESHOLD = np.deg2rad(float(require_config_value(adaptive, "turn_exit_threshold_deg", adaptive_name)))
     TURN_YAW_RATE_THRESHOLD = np.deg2rad(float(require_config_value(adaptive, "turn_yaw_rate_threshold_deg_s", adaptive_name)))
+    # 曲がり終了のヨーレートしきい値は任意設定(無ければ従来どおり開始側の半分)。
+    exit_yaw_arg = getattr(args, "turn_exit_yaw_rate_threshold_deg_s", None)
+    exit_yaw_deg = (
+        float(exit_yaw_arg) if exit_yaw_arg is not None
+        else adaptive.get("turn_exit_yaw_rate_threshold_deg_s")
+    )
+    TURN_EXIT_YAW_RATE_THRESHOLD = (
+        np.deg2rad(float(exit_yaw_deg)) if exit_yaw_deg is not None
+        else TURN_YAW_RATE_THRESHOLD * 0.5
+    )
+    if not TURN_EXIT_YAW_RATE_THRESHOLD > 0:
+        raise ValueError("turn_exit_yaw_rate_threshold_deg_s は正の値にしてください。")
     PARTICLE_RESIZE_JITTER_PX = float(require_config_value(adaptive, "particle_resize_jitter_px", adaptive_name))
 
     # 不確実性適応粒子数(§6.5相当)は任意設定。既定は無効で、JSON/CLIどちらでも
@@ -1835,6 +1922,12 @@ def apply_map_config(args, config, config_path):
         f"経路外重み={OFF_ROUTE_WEIGHT:.2f}"
     )
     logging.info(
+        "移動様態判定: 曲がり開始=方位変化%.1f度以上かつヨーレート75%%値%.1f度/秒以上, "
+        "曲がり終了=方位変化%.1f度未満かつヨーレート75%%値%.1f度/秒未満",
+        np.rad2deg(TURN_ENTER_THRESHOLD), np.rad2deg(TURN_YAW_RATE_THRESHOLD),
+        np.rad2deg(TURN_EXIT_THRESHOLD), np.rad2deg(TURN_EXIT_YAW_RATE_THRESHOLD),
+    )
+    logging.info(
         f"初期方位校正: {HEADING_CALIBRATION_MODE}"
         + (f" (先頭{HEADING_CALIBRATION_STEPS}歩)" if HEADING_CALIBRATION_MODE == "walking" else "")
     )
@@ -1897,6 +1990,7 @@ def load_map_config_for_tool(map_config_path):
         uncertainty_adaptive_particles=None, uncertainty_neff_low_ratio=None,
         uncertainty_neff_high_ratio=None, uncertainty_boost_factor=None,
         uncertainty_shrink_factor=None, pf_mode=None, fixed_particles=None,
+        turn_exit_yaw_rate_threshold_deg_s=None,
         multi_hypothesis_routing_enabled=None, multi_hypothesis_routing_simplify_px=None,
         multi_hypothesis_branch_heading_sigma_deg=None,
         multi_hypothesis_branch_likelihood_sigma_deg=None,
@@ -2743,6 +2837,12 @@ def redraw_all_paths():
             }, context=cache_context)
 
             logging.info(f"  処理ステップ数: {step_count}  全滅回数: {extinction_count}")
+            if extinction_count > 0:
+                logging.info(
+                    "  全滅からの復帰: この歩の移動量だけ進めた位置=%d回, "
+                    "移動前の位置(進めた位置に有効な場所が足りない)=%d回",
+                    pf.recovery_moved_count, pf.recovery_fallback_count,
+                )
             logging.info(f"  最終経路線分: segment={route_segment_index}, turn_pending={turn_pending}")
             if particle_count_history:
                 straight_count = behavior_history.count(MoveBehavior.STRAIGHT.value)

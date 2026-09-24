@@ -40,6 +40,10 @@ PDR(歩行者自律測位)+移動様態適応型パーティクルフィルタ�
 - `calibrate_step_length.py` — 歩幅校正ゲイン(`step_length_calibration_gain`)の再同定。
   計測一覧表の`calib`の行(距離既知の直線歩行)から全CSV共通のゲインを1つ求め、ファイル別の表・
   leave-one-out・歩調と歩幅の図を`results/`へ出す。`--self-test`あり。JSONへの反映は手動
+- `calibrate_turn_threshold.py` — 移動様態判定の曲がり終了のヨーレートしきい値
+  (`adaptive_pf.turn_exit_yaw_rate_threshold_deg_s`)を、同じ一覧表の`calib`の行(直線歩行)から決める。
+  直進中の各歩のヨーレート75%値の95パーセンタイルを推奨値とし、今の値と推奨値で「曲がり」と判定される
+  歩の割合も出す。`--self-test`あり。JSONへの反映は手動(今の10.0は暫定値)
 - `run_evaluation.py` — **卒論第7章の比較実験を一括実行する評価ハーネス**。計測一覧表の`eval`の行
   について、正解位置の作成→本体を「方式×シード」で実行→RMSE等の計算までを行い、方式別・ファイル別の
   表(平均±標準偏差)、箱ひげ図、軌跡図、実行条件の記録を`results/<日時>_evaluation[_tag]/`へ出す。
@@ -103,7 +107,7 @@ calib/pdr_log_0925_1010.csv,calib,,30.0,slow,1,
 pdr_log_0925_1030.csv,eval,east_std,,,1,
 ```
 
-- `purpose`: `calib`(歩幅校正用の直線歩行、`distance_m`と`speed`=slow/normal/fastを書く)/
+- `purpose`: `calib`(直線歩行。歩幅校正と曲がり終了のしきい値の校正に使う。`distance_m`と`speed`=slow/normal/fastを書く)/
   `eval`(比較実験用、`route`=`ground_truth/kanri_4f_landmarks_<route>.csv`の`<route>`を書く)
 - `use`: 撮り直した記録は消さずに`0`にする
 - 任意の`start_heading_deg`列(memoの前): 経路が定義されていない`eval`の記録だけに書く、歩き始めの向き[度]。
