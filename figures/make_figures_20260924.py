@@ -9,16 +9,16 @@
   20260924_quick_check方位判定_修正前後_1438_1441_1442.png
       tools/quick_check.py の「方位の正味回転」の測り方を、修正前(記録の最初と最後の差)と
       修正後(最初と最後の5歩の平均の差)で比べた図。
-  20260924_推定軌跡_4方式の比較_1441_1442_1438_seed42.png
+  pdr_program/results/20260918_133540_evaluation_0805check/20260924_推定軌跡_4方式の比較_1441_1442_1438_seed42.png
       同日の比較実験(pdr_program/results/20260924_120622_evaluation_0805check_recovery/)の
       4方式の軌跡(seed=42)を、申告された歩行経路と一緒に3本まとめて描いた図。軌跡CSVは
       gitに含めない runs/ にあるので、無ければ run_evaluation.py を同じ条件で実行し直す。
-  20260924_推定軌跡_9月18日と9月24日の比較_全滅時の復帰の変更前後.png
+  進捗報告/20260924_推定軌跡_9月18日と9月24日の比較_全滅時の復帰の変更前後.png
       9/18の比較実験(20260918_133540_evaluation_0805check/)と9/24の比較実験で、方式B・C・Eの
       軌跡(seed=42)と6シードの終点を重ねた図。2つの実験で主な4方式に効く違いは、全滅時の復帰の
       変更(コミット55e3e74)だけ。方式Aは乱数も全滅も無いので同一(確認済み)で、図には入れない。
 
-どれも研究結果(RMSE)ではなく、判定・確認の仕組みや軌跡の様子を説明するための図である。
+推定軌跡の2枚はこのフォルダの外に保存する。どれも研究結果(RMSE)ではなく、判定・確認の仕組みや軌跡の様子を説明するための図である。
 実行(i22satou/ で。Windowsでは PDR_DATA_DIR を設定する):
     python figures/make_figures_20260924.py
 """
@@ -331,6 +331,6 @@ def figure_before_after(out, seed=42):
 if __name__ == "__main__":
     figure_behavior(HERE / "20260924_移動様態判定_曲がりが終わらない問題_1441_1442.png")
     figure_quick_check(HERE / "20260924_quick_check方位判定_修正前後_1438_1441_1442.png")
-    figure_trajectories(HERE / "20260924_推定軌跡_4方式の比較_1441_1442_1438_seed42.png")
-    figure_before_after(HERE / "20260924_推定軌跡_9月18日と9月24日の比較_全滅時の復帰の変更前後.png")
-    print("保存しました:", HERE)
+    figure_trajectories(EVAL_0918 / "20260924_推定軌跡_4方式の比較_1441_1442_1438_seed42.png")
+    figure_before_after(HERE.parent / "進捗報告" / "20260924_推定軌跡_9月18日と9月24日の比較_全滅時の復帰の変更前後.png")
+    print("保存しました")
