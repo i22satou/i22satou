@@ -9,11 +9,16 @@
   20260924_quick_check方位判定_修正前後_1438_1441_1442.png
       tools/quick_check.py の「方位の正味回転」の測り方を、修正前(記録の最初と最後の差)と
       修正後(最初と最後の5歩の平均の差)で比べた図。
+  20260924_推定軌跡_4方式の比較_1441_1442_1438_seed42.png
+      同日の比較実験(pdr_program/results/20260924_120622_evaluation_0805check_recovery/)の
+      4方式の軌跡(seed=42)を、申告された歩行経路と一緒に3本まとめて描いた図。軌跡CSVは
+      gitに含めない runs/ にあるので、無ければ run_evaluation.py を同じ条件で実行し直す。
 
-どちらも研究結果(RMSE)ではなく、判定・確認の仕組みを説明するための図である。
+どれも研究結果(RMSE)ではなく、判定・確認の仕組みや軌跡の様子を説明するための図である。
 実行(i22satou/ で。Windowsでは PDR_DATA_DIR を設定する):
     python figures/make_figures_20260924.py
 """
+import json
 import os
 import sys
 from pathlib import Path
@@ -22,6 +27,8 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402
+import pandas as pd  # noqa: E402
+from matplotlib.colors import ListedColormap  # noqa: E402
 from matplotlib.lines import Line2D  # noqa: E402
 from matplotlib.patches import Patch  # noqa: E402
 
@@ -166,7 +173,82 @@ def figure_quick_check(out):
     plt.close(fig)
 
 
+EVAL = PROG / "results" / "20260924_120622_evaluation_0805check_recovery"
+TRAJ_STYLE = [  # run_evaluation.py の軌跡図と同じ色・線種
+    ("A_pdr", MUTED, "--", "A: PDRのみ"),
+    ("B_fixed", ORANGE, "-", "B: 固定粒子数PF"),
+    ("C_adaptive", "#1baf7a", "-", "C: 移動様態適応PF"),
+    ("E_proposed", BLUE, "-", "E: 提案方式"),
+]
+FILE_NOTES = [  # 方位の質は memo/heading_calibration.md の判断
+    ("pdr_log_0805_1441.csv", "方位の記録は使える"),
+    ("pdr_log_0805_1442.csv", "方位の記録は使える"),
+    ("pdr_log_0805_1438.csv", "方位の記録が壊れている。参考"),
+]
+
+
+def figure_trajectories(out, seed=42):
+    binary, _pf, _dist = p.load_preprocessed_map(resolved.map)
+    used = json.loads((EVAL / "used_map_config.json").read_text(encoding="utf-8"))
+    corners = np.array(used["route_points"][1:], float)  # 先頭は手動経路の西端。実際の開始位置に置き換える
+    end = corners[-1]
+    starts = pd.read_csv(PROG / "start_positions.csv").set_index("file_name")
+    runs = pd.read_csv(EVAL / "results_long.csv", encoding="utf-8-sig")
+    proxy = pd.read_csv(EVAL / "endpoint_proxy_0805.csv", encoding="utf-8-sig")
+    xmax = 880  # これより東は軌跡も経路も通らないので切る
+    fig, axes = plt.subplots(3, 1, figsize=(11, 13.2))
+    for ax, (name, note) in zip(axes, FILE_NOTES):
+        ax.imshow(np.where(binary == 255, 1, 0), cmap=ListedColormap(["#d6d5cf", "#ffffff"]),
+                  interpolation="nearest", vmin=0, vmax=1)
+        start = starts.loc[name, ["start_x", "start_y"]].to_numpy(float)
+        route = np.vstack([start, corners])
+        ax.plot(route[:, 0], route[:, 1], color="#f2c230", linewidth=9, alpha=0.45,
+                solid_joinstyle="round", solid_capstyle="round", zorder=2)
+        distances = []
+        for key, color, linestyle, label in TRAJ_STYLE:
+            row = runs[(runs["method_key"] == key) & (runs["file"] == name)
+                       & ((runs["seed"] == seed) | runs["seed"].isna())].iloc[0]
+            rel = row["trajectory"].replace("\\", "/").split("/runs/", 1)[1]
+            t = pd.read_csv(EVAL / "runs" / rel)
+            ax.plot(np.r_[start[0], t["x_px"]], np.r_[start[1], t["y_px"]], color=color,
+                    linestyle=linestyle, linewidth=1.8, zorder=3)
+            mean = proxy.loc[(proxy["method_key"] == key) & (proxy["file"] == name), "mean_m"]
+            distances.append(f"{label.split(':')[0]} {mean.iloc[0]:.1f}")
+        ax.scatter(*start, marker="s", s=60, color=INK, edgecolors="white", linewidths=1, zorder=5)
+        ax.scatter(*end, marker="*", s=220, color="#f2c230", edgecolors=INK, linewidths=1, zorder=5)
+        ax.set_xlim(0, xmax)
+        ax.set_ylim(binary.shape[0], 0)
+        ax.set_xticks([])
+        ax.set_yticks([])
+        for spine in ax.spines.values():
+            spine.set_visible(False)
+        ax.set_title(f"{name}({note})\n終点までの距離 [m](6シードの平均): " + " / ".join(distances),
+                     fontsize=10, color=INK)
+    handles = [Line2D([], [], color=c, linestyle=ls, linewidth=1.8, label=lb)
+               for _k, c, ls, lb in TRAJ_STYLE]
+    handles += [Line2D([], [], color="#f2c230", linewidth=9, alpha=0.45, label="歩いた経路(申告)"),
+                Line2D([], [], linestyle="none", marker="s", markersize=7, color=INK,
+                       markeredgecolor="white", label="開始位置"),
+                Line2D([], [], linestyle="none", marker="*", markersize=13, color="#f2c230",
+                       markeredgecolor=INK, label="終点(申告、800,115)")]
+    fig.legend(handles=handles, loc="lower center", ncol=4, frameon=False, fontsize=9,
+               bbox_to_anchor=(0.5, 0.035))
+    fig.text(0.5, 0.0,
+             "既存の実測3本(調整用データで、評価用データではない)。時刻対応した正解位置が無いのでRMSEは出せず、\n"
+             "「終点までの距離」は代替指標。軌跡は seed=42 の1回分、方位は全方式 android+walking。"
+             "PDRのみ(A)は地図の外へ出た部分を切っている。\n"
+             "曲がり終了のしきい値が暫定値(10度/秒)で歩の8割以上が「曲がり」判定のため、"
+             "BとCの差は様態適応の有無をほとんど反映していない。",
+             ha="center", va="bottom", fontsize=8.5, color=MUTED, linespacing=1.5)
+    fig.suptitle("比較する4方式の推定軌跡(2026-09-24、コミット55e3e74の比較実験)",
+                 fontsize=12, color=INK)
+    fig.tight_layout(rect=(0, 0.1, 1, 0.97))
+    fig.savefig(out, dpi=170, bbox_inches="tight")
+    plt.close(fig)
+
+
 if __name__ == "__main__":
     figure_behavior(HERE / "20260924_移動様態判定_曲がりが終わらない問題_1441_1442.png")
     figure_quick_check(HERE / "20260924_quick_check方位判定_修正前後_1438_1441_1442.png")
+    figure_trajectories(HERE / "20260924_推定軌跡_4方式の比較_1441_1442_1438_seed42.png")
     print("保存しました:", HERE)
