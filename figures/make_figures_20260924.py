@@ -13,6 +13,10 @@
       同日の比較実験(pdr_program/results/20260924_120622_evaluation_0805check_recovery/)の
       4方式の軌跡(seed=42)を、申告された歩行経路と一緒に3本まとめて描いた図。軌跡CSVは
       gitに含めない runs/ にあるので、無ければ run_evaluation.py を同じ条件で実行し直す。
+  20260924_推定軌跡_9月18日と9月24日の比較_全滅時の復帰の変更前後.png
+      9/18の比較実験(20260918_133540_evaluation_0805check/)と9/24の比較実験で、方式B・C・Eの
+      軌跡(seed=42)と6シードの終点を重ねた図。2つの実験で主な4方式に効く違いは、全滅時の復帰の
+      変更(コミット55e3e74)だけ。方式Aは乱数も全滅も無いので同一(確認済み)で、図には入れない。
 
 どれも研究結果(RMSE)ではなく、判定・確認の仕組みや軌跡の様子を説明するための図である。
 実行(i22satou/ で。Windowsでは PDR_DATA_DIR を設定する):
@@ -174,6 +178,7 @@ def figure_quick_check(out):
 
 
 EVAL = PROG / "results" / "20260924_120622_evaluation_0805check_recovery"
+EVAL_0918 = PROG / "results" / "20260918_133540_evaluation_0805check"
 TRAJ_STYLE = [  # run_evaluation.py の軌跡図と同じ色・線種
     ("A_pdr", MUTED, "--", "A: PDRのみ"),
     ("B_fixed", ORANGE, "-", "B: 固定粒子数PF"),
@@ -187,51 +192,71 @@ FILE_NOTES = [  # 方位の質は memo/heading_calibration.md の判断
 ]
 
 
-def figure_trajectories(out, seed=42):
-    binary, _pf, _dist = p.load_preprocessed_map(resolved.map)
+ROUTE, OLD = "#f2c230", "#aeada7"
+
+
+def route_geometry():
+    """申告された歩行経路の角と終点、各CSVの開始位置、縮尺(比較実験で使った設定から読む)。"""
     used = json.loads((EVAL / "used_map_config.json").read_text(encoding="utf-8"))
     corners = np.array(used["route_points"][1:], float)  # 先頭は手動経路の西端。実際の開始位置に置き換える
-    end = corners[-1]
     starts = pd.read_csv(PROG / "start_positions.csv").set_index("file_name")
+    return corners, starts, float(used["scale_px_per_m"])
+
+
+def load_trajectory(eval_dir, row):
+    """results_long.csv の1行が指す軌跡CSV(runs/ の下)を読む。"""
+    rel = row["trajectory"].replace("\\", "/").split("/runs/", 1)[1]
+    return pd.read_csv(eval_dir / "runs" / rel)
+
+
+def map_panel(ax, binary, start, corners, xmax=880):
+    """地図・申告された歩行経路・開始位置・終点を描く。xmaxより東は軌跡も経路も通らないので切る。"""
+    ax.imshow(np.where(binary == 255, 1, 0), cmap=ListedColormap(["#d6d5cf", "#ffffff"]),
+              interpolation="nearest", vmin=0, vmax=1)
+    route = np.vstack([start, corners])
+    ax.plot(route[:, 0], route[:, 1], color=ROUTE, linewidth=9, alpha=0.45,
+            solid_joinstyle="round", solid_capstyle="round", zorder=2)
+    ax.scatter(*start, marker="s", s=60, color=INK, edgecolors="white", linewidths=1, zorder=5)
+    ax.scatter(*corners[-1], marker="*", s=220, color=ROUTE, edgecolors=INK, linewidths=1, zorder=5)
+    ax.set_xlim(0, xmax)
+    ax.set_ylim(binary.shape[0], 0)
+    ax.set_xticks([])
+    ax.set_yticks([])
+    for spine in ax.spines.values():
+        spine.set_visible(False)
+
+
+def map_handles():
+    return [Line2D([], [], color=ROUTE, linewidth=9, alpha=0.45, label="歩いた経路(申告)"),
+            Line2D([], [], linestyle="none", marker="s", markersize=7, color=INK,
+                   markeredgecolor="white", label="開始位置"),
+            Line2D([], [], linestyle="none", marker="*", markersize=13, color=ROUTE,
+                   markeredgecolor=INK, label="終点(申告、800,115)")]
+
+
+def figure_trajectories(out, seed=42):
+    binary, _pf, _dist = p.load_preprocessed_map(resolved.map)
+    corners, starts, _scale = route_geometry()
     runs = pd.read_csv(EVAL / "results_long.csv", encoding="utf-8-sig")
     proxy = pd.read_csv(EVAL / "endpoint_proxy_0805.csv", encoding="utf-8-sig")
-    xmax = 880  # これより東は軌跡も経路も通らないので切る
     fig, axes = plt.subplots(3, 1, figsize=(11, 13.2))
     for ax, (name, note) in zip(axes, FILE_NOTES):
-        ax.imshow(np.where(binary == 255, 1, 0), cmap=ListedColormap(["#d6d5cf", "#ffffff"]),
-                  interpolation="nearest", vmin=0, vmax=1)
         start = starts.loc[name, ["start_x", "start_y"]].to_numpy(float)
-        route = np.vstack([start, corners])
-        ax.plot(route[:, 0], route[:, 1], color="#f2c230", linewidth=9, alpha=0.45,
-                solid_joinstyle="round", solid_capstyle="round", zorder=2)
+        map_panel(ax, binary, start, corners)
         distances = []
         for key, color, linestyle, label in TRAJ_STYLE:
             row = runs[(runs["method_key"] == key) & (runs["file"] == name)
                        & ((runs["seed"] == seed) | runs["seed"].isna())].iloc[0]
-            rel = row["trajectory"].replace("\\", "/").split("/runs/", 1)[1]
-            t = pd.read_csv(EVAL / "runs" / rel)
+            t = load_trajectory(EVAL, row)
             ax.plot(np.r_[start[0], t["x_px"]], np.r_[start[1], t["y_px"]], color=color,
                     linestyle=linestyle, linewidth=1.8, zorder=3)
             mean = proxy.loc[(proxy["method_key"] == key) & (proxy["file"] == name), "mean_m"]
             distances.append(f"{label.split(':')[0]} {mean.iloc[0]:.1f}")
-        ax.scatter(*start, marker="s", s=60, color=INK, edgecolors="white", linewidths=1, zorder=5)
-        ax.scatter(*end, marker="*", s=220, color="#f2c230", edgecolors=INK, linewidths=1, zorder=5)
-        ax.set_xlim(0, xmax)
-        ax.set_ylim(binary.shape[0], 0)
-        ax.set_xticks([])
-        ax.set_yticks([])
-        for spine in ax.spines.values():
-            spine.set_visible(False)
         ax.set_title(f"{name}({note})\n終点までの距離 [m](6シードの平均): " + " / ".join(distances),
                      fontsize=10, color=INK)
     handles = [Line2D([], [], color=c, linestyle=ls, linewidth=1.8, label=lb)
                for _k, c, ls, lb in TRAJ_STYLE]
-    handles += [Line2D([], [], color="#f2c230", linewidth=9, alpha=0.45, label="歩いた経路(申告)"),
-                Line2D([], [], linestyle="none", marker="s", markersize=7, color=INK,
-                       markeredgecolor="white", label="開始位置"),
-                Line2D([], [], linestyle="none", marker="*", markersize=13, color="#f2c230",
-                       markeredgecolor=INK, label="終点(申告、800,115)")]
-    fig.legend(handles=handles, loc="lower center", ncol=4, frameon=False, fontsize=9,
+    fig.legend(handles=handles + map_handles(), loc="lower center", ncol=4, frameon=False, fontsize=9,
                bbox_to_anchor=(0.5, 0.035))
     fig.text(0.5, 0.0,
              "既存の実測3本(調整用データで、評価用データではない)。時刻対応した正解位置が無いのでRMSEは出せず、\n"
@@ -247,8 +272,65 @@ def figure_trajectories(out, seed=42):
     plt.close(fig)
 
 
+def figure_before_after(out, seed=42):
+    """9/18と9/24の比較実験で、方式B・C・Eの軌跡(seed固定)と6シードの終点を重ねる。"""
+    binary, _pf, _dist = p.load_preprocessed_map(resolved.map)
+    corners, starts, scale = route_geometry()
+    old_cfg = json.loads((EVAL_0918 / "used_map_config.json").read_text(encoding="utf-8"))
+    assert np.allclose(old_cfg["route_points"][1:], corners), "2つの実験で経路の設定が違う"
+    end = corners[-1]
+    runs = {d: pd.read_csv(d / "results_long.csv", encoding="utf-8-sig") for d in (EVAL_0918, EVAL)}
+    styles = {key: (color, label) for key, color, _ls, label in TRAJ_STYLE}
+    fig, axes = plt.subplots(3, 3, figsize=(17, 10.0))
+    for r, (name, note) in enumerate(FILE_NOTES):
+        start = starts.loc[name, ["start_x", "start_y"]].to_numpy(float)
+        for c, key in enumerate(["B_fixed", "C_adaptive", "E_proposed"]):
+            ax = axes[r, c]
+            color, label = styles[key]
+            map_panel(ax, binary, start, corners)
+            summary = []
+            # 変更前は灰色の太線・白抜きの点、変更後は方式の色の細線・塗りの点。同じなら灰色の中に色が重なる
+            for eval_dir, line_color, width, face, edge, z in (
+                    (EVAL_0918, OLD, 4.5, "white", OLD, 3), (EVAL, color, 1.6, color, "white", 4)):
+                df = runs[eval_dir]
+                sel = df[(df["method_key"] == key) & (df["file"] == name)]
+                t = load_trajectory(eval_dir, sel[sel["seed"] == seed].iloc[0])
+                ax.plot(np.r_[start[0], t["x_px"]], np.r_[start[1], t["y_px"]], color=line_color,
+                        linewidth=width, solid_capstyle="round", solid_joinstyle="round", zorder=z)
+                ax.scatter(sel["final_x"], sel["final_y"], s=28, facecolor=face, edgecolor=edge,
+                           linewidths=1.3, zorder=z + 3)
+                dist = np.hypot(sel["final_x"] - end[0], sel["final_y"] - end[1]) / scale
+                summary.append((sel["extinctions"].sum(), dist.mean()))
+            (ext0, d0), (ext1, d1) = summary
+            ax.set_title(f"{label}(全滅 {ext0:.0f}→{ext1:.0f}回、6シードの合計)\n"
+                         f"終点までの距離 {d0:.1f}→{d1:.1f} m(6シードの平均)", fontsize=9.5, color=INK)
+        axes[r, 0].set_ylabel(f"{name}\n({note})", fontsize=9.5, color=INK)
+    handles = [Line2D([], [], color=OLD, linewidth=4.5, label="9月18日(変更前)の軌跡"),
+               Line2D([], [], color=INK, linewidth=1.6, label="9月24日(変更後)の軌跡(色は方式)"),
+               Line2D([], [], linestyle="none", marker="o", markersize=6, markerfacecolor="white",
+                      markeredgecolor=OLD, markeredgewidth=1.3, label="9月18日の終点(6シード)"),
+               Line2D([], [], linestyle="none", marker="o", markersize=6, color=INK,
+                      markeredgecolor="white", label="9月24日の終点(6シード)")]
+    fig.legend(handles=handles + map_handles(), loc="lower center", ncol=4, frameon=False,
+               fontsize=9, bbox_to_anchor=(0.5, 0.068))
+    fig.text(0.5, 0.0,
+             "2つの実験で主な方式に効く違いは、粒子が全滅したときの復帰の仕方だけ(9月24日: その歩の移動量だけ"
+             "進めた位置へまき直す。壁を越えるなら従来どおり移動前の位置へ)。\n"
+             "全滅が起きなかった実行は両日で完全に同じになり、灰色の太線の中に色の線が重なる。"
+             "変わった実行には、全滅後に乱数の使い方が変わった影響も含まれる。\n"
+             f"軌跡は seed={seed} の1回分、点は6シードの終点。方式A(PDRのみ)は乱数も全滅も無いので両日で同じ"
+             "(図には入れていない)。既存の実測3本(調整用データ)、方位は全方式 android+walking。\n"
+             "終点までの距離はRMSEではない代替指標。",
+             ha="center", va="bottom", fontsize=8.5, color=MUTED, linespacing=1.5)
+    fig.suptitle("全滅時の復帰の変更前後の推定軌跡(9月18日と9月24日の比較実験)", fontsize=12, color=INK)
+    fig.tight_layout(rect=(0, 0.12, 1, 0.97), h_pad=2.0)
+    fig.savefig(out, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+
+
 if __name__ == "__main__":
     figure_behavior(HERE / "20260924_移動様態判定_曲がりが終わらない問題_1441_1442.png")
     figure_quick_check(HERE / "20260924_quick_check方位判定_修正前後_1438_1441_1442.png")
     figure_trajectories(HERE / "20260924_推定軌跡_4方式の比較_1441_1442_1438_seed42.png")
+    figure_before_after(HERE / "20260924_推定軌跡_9月18日と9月24日の比較_全滅時の復帰の変更前後.png")
     print("保存しました:", HERE)
