@@ -2,6 +2,10 @@
 # compare_route_source.py
 #
 # 【変更履歴】
+# - 2026-09-24: 地図ごとに1回の前処理の時間(経路帯の自動抽出・通路中心線の抽出・通路グラフの
+#               構築)を parse_preprocessing_times() で読めるようにし、parse_log() の各ファイルの
+#               行にも同じ値を付けた(route_extract_s、centerline_extract_s、route_graph_build_s)。
+#               キーを足しただけで、既存のキーと出力は変わらない。
 # - 2026-09-24: parse_log() が平均・最小・最大粒子数(particles_mean/min/max)と処理時間
 #               (pf_update_ms_mean/median、pf_update_total_s、behavior_ms_mean、
 #               estimation_total_s)も読むようにした(本体のログの新しい行)。キーを足した
@@ -113,6 +117,23 @@ REF_TIME_RE = re.compile(
     r"処理時間\(参考\): 移動様態判定 平均=(?P<behavior>[\d.]+)ms/歩, "
     r"推定処理全体 合計=(?P<total>[\d.]+)秒"
 )
+# 地図ごとに1回の前処理(起動時に1回だけ出る。route_source=auto のときだけ)。
+PREPROCESSING_RES = {
+    "route_extract_s": re.compile(r"処理時間\(経路帯の自動抽出\): (?P<s>[\d.]+)秒"),
+    "centerline_extract_s": re.compile(r"処理時間\(通路中心線の抽出\): (?P<s>[\d.]+)秒"),
+    "route_graph_build_s": re.compile(r"処理時間\(通路グラフの構築\): (?P<s>[\d.]+)秒"),
+}
+
+
+def parse_preprocessing_times(log_text):
+    """本体1回の実行のログから、地図ごとに1回の前処理の時間[秒]を読む(出ていない項目は無い)。"""
+    found = {}
+    for line in log_text.splitlines():
+        for key, pattern in PREPROCESSING_RES.items():
+            m = pattern.search(line)
+            if m and key not in found:
+                found[key] = float(m.group("s"))
+    return found
 
 
 def run_condition(map_config, seed, heading_source, condition):
@@ -187,6 +208,10 @@ def parse_log(log_text):
             pending["estimation_total_s"] = float(m.group("total"))
             continue
     flush()
+    # 地図ごとに1回の前処理の時間は、その実行の全ファイルに共通の値として各行に付ける
+    preprocessing = parse_preprocessing_times(log_text)
+    for row in rows:
+        row.update(preprocessing)
     return rows
 
 

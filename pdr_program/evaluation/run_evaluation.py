@@ -2,6 +2,9 @@
 # run_evaluation.py
 #
 # 【変更履歴】
+# - 2026-09-24: 地図ごとに1回の前処理(経路帯の自動抽出、変種の通路中心線の抽出・通路グラフの
+#               構築)の時間を本体のログから読み、方式ごとに全実行の中央値・最小・最大を
+#               table_cost_preprocessing.csv に出す(歩ごとの処理時間の表とは分ける)。
 # - 2026-09-24: 計算量と曲がり位置誤差を加えた。(1)本体のログから平均・最小・最大粒子数と
 #               処理時間(PF更新・移動様態判定・推定処理全体)を読み、results_long.csv の列と
 #               計算量の表(table_cost_by_method[_file].csv)にした。処理時間は計算機に依存するので、
@@ -50,6 +53,9 @@
 #                             (方式Aは乱数を使わないので1ファイル1値)
 #   table_cost_by_method.csv / table_cost_by_method_file.csv
 #                             計算量(平均粒子数・処理時間)。正解位置が無くても出す。方式Aは空欄
+#   table_cost_preprocessing.csv
+#                             地図ごとに1回の前処理(経路帯の自動抽出など)の時間。方式ごとに
+#                             全実行の中央値・最小・最大(経路帯を自動抽出する方式だけ)
 #   table_C_vs_E_rmse.csv / table_C_vs_E_turn_error.csv
 #                             記録ごとの方式Cと提案方式の差(シード平均のE−C)と、改善した記録の
 #                             数・差の平均と標準偏差(検定はしない)
@@ -110,7 +116,7 @@ sys.path.insert(0, str(EVALUATION_DIR))
 import pdr_pf_improved as pdrmod  # noqa: E402
 from build_ground_truth import build_ground_truth, load_landmarks, load_waypoints  # noqa: E402
 from calibrate_step_length import git_revision  # noqa: E402
-from compare_route_source import parse_log  # noqa: E402
+from compare_route_source import parse_log, parse_preprocessing_times  # noqa: E402
 from evaluate_accuracy import (  # noqa: E402
     END_HOLD_SEC, TURN_MIN_DEG, evaluate, evaluate_turning_points, turning_landmark_seqs)
 from measurement_list import load_measurement_list, resolve_csv_path  # noqa: E402
@@ -190,6 +196,18 @@ TIMING_DEFINITION = (
     "推定処理全体の時間 = CSVを読み込んだ後から全歩の処理が終わるまで(センサーの前処理・歩の検出・"
     "方位の計算・PF更新・PDRのみの積算を含み、CSVと地図の読み込み・経路帯の自動抽出・描画・保存は含まない)。"
     "表の値は、1実行・1ファイルの値の平均±標本標準偏差。")
+# 地図ごとに1回の前処理(compare_route_source.parse_preprocessing_times のキー, 見出し)
+PREPROCESSING_ITEMS = [("route_extract_s", "経路帯の自動抽出"),
+                       ("centerline_extract_s", "通路中心線の抽出"),
+                       ("route_graph_build_s", "通路グラフの構築")]
+PREPROCESSING_DEFINITION = (
+    "地図ごとに1回の前処理の時間。本体(pdr_pf_improved.py)が起動時に1回だけ行う処理の実時間を"
+    "time.perf_counter() で測る(監視中の再描画でも作り直さず、キャッシュも無いので、各実行の値は"
+    "実際に計算した時間)。経路帯の自動抽出 = 二値地図を渡してから経路帯(route_mask)ができるまで"
+    "(route_source=auto の方式だけ。広い部屋の除外を有効にした変種はその処理を含む。地図の読み込み・"
+    "描画は含まない)。通路中心線の抽出 = --auto-route-centerline を有効にした変種だけ。通路グラフの"
+    "構築 = 複数経路仮説を有効にした変種だけ(骨格化・グラフの簡略化・区間の構築)。歩ごとの処理時間"
+    "とは混ぜず、方式ごとに全実行(シード×初期方位のグループ。1実行が地図1回分)の中央値・最小・最大を示す。")
 PARTICLES_DEFINITION = (
     "各歩の pf.update() の直後の粒子数を、ファイルの全歩で平均した値(本体のログの"
     "「パーティクル数: 平均」)。表の値は、1実行・1ファイルの値の平均±標本標準偏差。"
@@ -463,6 +481,7 @@ def run_program(items, methods, seeds, ctx):
                     runs.append({"method": method["key"], "seed": seed, "group": group,
                                  "files": [i["name"] for i in members], "returncode": code,
                                  "seconds": round(seconds, 1), "log": str(log_path),
+                                 "preprocessing_s": parse_preprocessing_times(log),
                                  "options": ["--data-dir", f"<{group}のCSVのコピー>", *options]})
                     status = "OK" if code == 0 else f"失敗({code})"
                     print(f"  [{count}/{total}] {method['key']} seed={seed} 初期方位{heading:g}度 "
@@ -640,6 +659,28 @@ def summarize_cost(df, keys):
     for column, _label, _digits in COST_METRICS:
         out[f"{column}_mean"], out[f"{column}_std"] = grouped[column].mean(), grouped[column].std(ddof=1)
     return out.reset_index()
+
+
+def summarize_preprocessing(runs):
+    """地図ごとに1回の前処理の時間を、方式ごとに全実行の中央値・最小・最大でまとめる
+    (値のある方式だけ。無ければNone)。1実行 = 本体の起動1回 = 地図1回分。"""
+    info = {m["key"]: m for m in METHODS}
+    rows = []
+    for key in METHOD_KEYS:
+        method_runs = [r for r in runs if r["method"] == key and r["returncode"] == 0]
+        if not any(r["preprocessing_s"] for r in method_runs):
+            continue
+        row = {"method_key": key, "方式": info[key]["label"],
+               "区分": {"main": "比較する4方式", "variant": "提案方式の変種"}[info[key]["kind"]],
+               "実行回数": len(method_runs)}
+        for column, label in PREPROCESSING_ITEMS:
+            values = [r["preprocessing_s"][column] for r in method_runs
+                      if column in r["preprocessing_s"]]
+            row[f"{label}の回数"] = len(values)
+            for stat, func in (("中央値", np.median), ("最小", np.min), ("最大", np.max)):
+                row[f"{label}[秒] {stat}"] = float(func(values)) if values else np.nan
+        rows.append(row)
+    return pd.DataFrame(rows) if rows else None
 
 
 def compare_c_vs_e(df, column, label):
@@ -909,6 +950,13 @@ def run_evaluation(list_path, data_dir, map_config, out_root=RESULTS_DIR, tag=No
         table.to_csv(out_dir / f"{name}.csv", index=False, encoding="utf-8-sig",
                      float_format="%.4f")
         tables[name] = table
+    preprocessing = summarize_preprocessing(runs)
+    if preprocessing is not None:
+        if synthetic:
+            preprocessing.insert(0, "注意", "架空データ(研究結果ではない)")
+        preprocessing.to_csv(out_dir / "table_cost_preprocessing.csv", index=False,
+                             encoding="utf-8-sig", float_format="%.4f")
+        tables["table_cost_preprocessing"] = preprocessing
     if df["has_ground_truth"].any() and df["rmse_m"].notna().any():
         for name, keys in (("table_by_method", ["method_key"]),
                            ("table_by_method_file", ["method_key", "file"])):
@@ -959,6 +1007,7 @@ def run_evaluation(list_path, data_dir, map_config, out_root=RESULTS_DIR, tag=No
         "machine": machine_info(python),
         "timing_definition": TIMING_DEFINITION,
         "particles_definition": PARTICLES_DEFINITION,
+        "preprocessing_definition": PREPROCESSING_DEFINITION,
         "turn_error_definition": TURN_ERROR_DEFINITION,
         "turn_min_deg": TURN_MIN_DEG,
         "table_definitions": {
@@ -967,6 +1016,8 @@ def run_evaluation(list_path, data_dir, map_config, out_root=RESULTS_DIR, tag=No
             "table_cost_by_method": "方式ごとに、全ファイル×全シードの計算量の平均±標本標準偏差"
                                     "(正解位置の無い記録も含む。方式Aは空欄)",
             "table_cost_by_method_file": "方式・ファイルごとに、シード間の計算量の平均±標本標準偏差",
+            "table_cost_preprocessing": "方式ごとに、地図ごとに1回の前処理の時間の全実行での中央値・"
+                                        "最小・最大(経路帯を自動抽出する方式だけ。1実行が地図1回分)",
             "table_C_vs_E": "記録ごとに、方式Cと提案方式のシード平均の差(E-C、負なら提案方式が小さい="
                             "改善)。最後の行は改善した記録の数と差の平均・標本標準偏差。検定はしない",
         },
@@ -1011,6 +1062,14 @@ def print_report(result):
         print("\n=== 計算量(方式別、全ファイル×全シード。処理時間は同じ計算機の中でだけ比べる) ===")
         print(cost[["方式", "n", "平均粒子数 平均±標準偏差", "PF更新時間[ms/歩] 平均±標準偏差",
                     "PF更新時間の中央値[ms/歩] 平均±標準偏差"]].to_string(index=False))
+    pre = result["tables"].get("table_cost_preprocessing")
+    if pre is not None:
+        print("\n=== 地図ごとに1回の前処理(方式別、全実行の中央値 [最小〜最大] 秒) ===")
+        for _, row in pre.iterrows():
+            parts = [f"{label} {row[f'{label}[秒] 中央値']:.3f} [{row[f'{label}[秒] 最小']:.3f}〜"
+                     f"{row[f'{label}[秒] 最大']:.3f}]"
+                     for _col, label in PREPROCESSING_ITEMS if row[f"{label}の回数"] > 0]
+            print(f"  {row['方式']}({row['実行回数']}回): " + "、".join(parts))
     for note in result["notes"]:
         print(f"[注意] {note}")
     if result["failures"]:
@@ -1241,9 +1300,24 @@ def _self_test(keep_dir=None):
         assert cost.loc[cost["method_key"] != "A_pdr", "pf_update_ms_mean_mean"].gt(0).all()
         machine = conditions["machine"]
         assert all(machine.get(k) for k in ("cpu", "os", "python", "numpy", "execution")), machine
+        # 地図ごとに1回の前処理: 経路帯を自動抽出する方式(提案方式と変種)だけ、全実行で値がある
+        pre = result["tables"]["table_cost_preprocessing"].set_index("method_key")
+        auto_keys = [k for k in METHOD_KEYS if k.startswith("E_")]
+        assert list(pre.index) == auto_keys, list(pre.index)
+        assert (pre["実行回数"] == 4).all() and (pre["経路帯の自動抽出の回数"] == 4).all(), pre
+        assert (pre["経路帯の自動抽出[秒] 最小"] > 0).all()
+        assert (pre["経路帯の自動抽出[秒] 最小"] <= pre["経路帯の自動抽出[秒] 中央値"]).all()
+        assert (pre["経路帯の自動抽出[秒] 中央値"] <= pre["経路帯の自動抽出[秒] 最大"]).all()
+        centerline = pre["通路中心線の抽出の回数"]
+        graph = pre["通路グラフの構築の回数"]
+        assert centerline[centerline > 0].index.tolist() == ["E_rooms_centerline"], centerline
+        assert graph[graph > 0].index.tolist() == ["E_mh", "E_mh_bl"], graph
+        assert "perf_counter" in conditions["preprocessing_definition"]
+        assert "route_extract_s" not in df.columns  # 歩ごとの処理時間の表とは混ぜない
         assert "perf_counter" in conditions["timing_definition"]
         print(f"  OK: 平均粒子数と処理時間が全実行で埋まり(方式Aは空欄)、計算量の表と計算機の情報"
-              f"(CPU: {machine['cpu']})を残した")
+              f"(CPU: {machine['cpu']})を残した。地図ごとに1回の前処理は経路帯を自動抽出する"
+              f"{len(auto_keys)}方式だけ、別の表に全4実行の中央値・最小・最大を出した")
 
         # 方式Cと提案方式の記録ごとの比較(2026-09-24)
         by_file = result["tables"]["table_by_method_file"].set_index(["method_key", "file"])
@@ -1266,7 +1340,8 @@ def _self_test(keep_dir=None):
         assert abs(pdr_final["final_x"].iloc[0] - (380.0 - cum_west[-1])) < 1e-6, pdr_final
         for name in ("table_by_method.csv", "table_by_method_file.csv", "results_long.csv",
                      "table_diagnostics.csv", "table_cost_by_method.csv",
-                     "table_cost_by_method_file.csv", "table_C_vs_E_rmse.csv",
+                     "table_cost_by_method_file.csv", "table_cost_preprocessing.csv",
+                     "table_C_vs_E_rmse.csv",
                      "table_C_vs_E_turn_error.csv",
                      "boxplot_rmse.png", "boxplot_rmse_by_file.png", "conditions.json",
                      "used_map_config.json", "measurement_list.csv",

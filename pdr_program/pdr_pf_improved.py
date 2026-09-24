@@ -14,6 +14,8 @@
 #               移動様態判定の実時間、推定処理全体の実時間を測り、ファイルごとにログへ出す
 #               (「処理時間(PF更新)」「処理時間(参考)」の2行)。推定結果・PNGは不変。
 #               (4)滞留(STOPPED)が実際には使われないことをコメントに明記(動作は不変)。
+#               (5)地図ごとに1回の前処理(経路帯の自動抽出、有効時は通路中心線の抽出・
+#               通路グラフの構築)の実時間をログへ出す(推定結果は不変)。
 #               詳細はCHANGELOG.md。
 # - 2026-09-18: [本研究独自] 卒論第7章の比較方式を実行できるようにした。方式A(PDRのみ)
 #               の軌跡CSV(--save-pdr-trajectory-csv)、方式B(固定粒子数PF、--pf-mode fixed)、
@@ -3073,18 +3075,30 @@ def main():
         raise FileNotFoundError(f"CSVフォルダが見つかりません: {data_dir}")
     route_topology = None  # [本研究独自] 複数経路仮説PF。route_source=auto以外・未有効時はNoneのまま。
     if ROUTE_SOURCE == "auto":
+        # [本研究独自] 計算量の記録(2026-09-24)。経路帯の自動抽出は地図ごとに1回(起動時に
+        # 1回だけ計算し、監視中の再描画でも作り直さない。キャッシュは無い)なので、歩ごとの
+        # 処理時間とは別の行に出す。測る範囲は二値地図を渡してからroute_maskができるまで
+        # (広い部屋の除外を含む。地図の読み込み・描画は含まない)。乱数は使わない。
+        extract_start_time = time.perf_counter()
         route_mask = extract_auto_route_mask(
             binary_for_pf, AUTO_ROUTE_MAX_HALF_WIDTH_PX, AUTO_ROUTE_DILATION_PX,
             exclude_wide_rooms=AUTO_ROUTE_EXCLUDE_WIDE_ROOMS,
             exclude_wide_rooms_radius_px=AUTO_ROUTE_EXCLUDE_WIDE_ROOMS_RADIUS_PX,
         )
+        extract_seconds = time.perf_counter() - extract_start_time
         logging.info(
             f"自動抽出した通路マスク: 有効画素数={int(route_mask.sum())}/{route_mask.size} "
             f"(半径閾値={AUTO_ROUTE_MAX_HALF_WIDTH_PX:.1f}px, 膨張={AUTO_ROUTE_DILATION_PX:.1f}px)"
         )
+        logging.info("処理時間(経路帯の自動抽出): %.3f秒(地図ごとに1回)", extract_seconds)
         if AUTO_ROUTE_CENTERLINE_ENABLED:
+            centerline_start_time = time.perf_counter()
             centerline_points = extract_ordered_centerline(
                 route_mask, AUTO_ROUTE_CENTERLINE_SIMPLIFY_PX
+            )
+            logging.info(
+                "処理時間(通路中心線の抽出): %.3f秒(地図ごとに1回)",
+                time.perf_counter() - centerline_start_time,
             )
             if len(centerline_points) >= 2:
                 ROUTE_POINTS = centerline_points
@@ -3099,10 +3113,15 @@ def main():
                     "方位補正は無効のままです(従来通り空間マスクのみ)。"
                 )
         if MULTI_HYPOTHESIS_ROUTING_ENABLED:
+            graph_start_time = time.perf_counter()
             skeleton_graph = build_skeleton_graph(route_mask)
             simplified_graph = simplify_skeleton_graph(skeleton_graph)
             route_topology = build_route_graph_topology(
                 simplified_graph, MULTI_HYPOTHESIS_ROUTING_SIMPLIFY_PX
+            )
+            logging.info(
+                "処理時間(通路グラフの構築): %.3f秒(地図ごとに1回)",
+                time.perf_counter() - graph_start_time,
             )
             if route_topology["edges"]:
                 n_junction = sum(1 for n in simplified_graph["nodes"] if n["kind"] == "junction")
