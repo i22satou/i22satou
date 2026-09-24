@@ -13,6 +13,7 @@
 #               記録の結果は変わる。(3)計算量の記録として、歩ごとのPF更新(pf.update)と
 #               移動様態判定の実時間、推定処理全体の実時間を測り、ファイルごとにログへ出す
 #               (「処理時間(PF更新)」「処理時間(参考)」の2行)。推定結果・PNGは不変。
+#               (4)滞留(STOPPED)が実際には使われないことをコメントに明記(動作は不変)。
 #               詳細はCHANGELOG.md。
 # - 2026-09-18: [本研究独自] 卒論第7章の比較方式を実行できるようにした。方式A(PDRのみ)
 #               の軌跡CSV(--save-pdr-trajectory-csv)、方式B(固定粒子数PF、--pf-mode fixed)、
@@ -90,14 +91,18 @@
 #   (複数経路仮説PF側も2026-09-02に同じ挙動へ揃えた)。
 #
 # 【移動様態判定】
-# - 歩行者の移動様態をSTOPPED、STRAIGHT、TURNINGの3状態で判定する。
+# - 歩行者の移動様態を、歩を検出した時にSTRAIGHT/TURNINGのどちらかに判定する。
+#   STOPPED(滞留)は判定では使わず、歩が検出されない間はPFを更新しない(粒子の位置と
+#   重みをそのまま保つ)ことで扱う。先行研究も滞留を歩の検知で判断し、滞留中はセンサの値を
+#   位置の推定に使わないので、同じ扱いになる。MoveBehavior.STOPPEDと滞留用のパラメータは
+#   残しているが実際には使われない(ログの「滞留」は常に0。2026-09-24に確認)。
 # - 曲がり判定は、一定時間内の方位変化とヨーレートのAND条件で行う。
 # - ヨーレートは瞬間最大値ではなく75パーセンタイルを使い、手ぶれの影響を抑える。
 # - TURNING判定にヒステリシスを入れ、STRAIGHT/TURNINGの頻繁な振動を防ぐ。
 #
 # 【移動様態適応型パーティクルフィルタ】
-# - 直進/曲がり/滞留で粒子数・歩幅ノイズ・方位ノイズを切り替える
-#   (現在のJSON設定は直進250/曲がり600/滞留100)。
+# - 直進/曲がりで粒子数・歩幅ノイズ・方位ノイズを切り替える(現在のJSON設定は直進250/
+#   曲がり600)。JSONの滞留用の値(particles_stopped等)は必須項目として読むが使われない。
 # - 粒子数の変更は現在の重みに従うリサンプリングで行い、増加時は複製粒子へ
 #   微小な位置摂動を加える。壁衝突判定・全滅復帰も可変粒子数に対応する。
 # - パラメータはmap_configs/*.jsonのadaptive_pfセクションで変更する。
@@ -158,7 +163,7 @@
 #     correct_heading_with_route_segment, advance_route_segment,
 #     is_near_route_corner)。両先行研究には地図の通路方向情報を用いる処理は
 #     存在せず、本研究が追加した「地図形状を用いた適応制御」の中心部分にあたる。
-#   - 地図規模に合わせた適応的パーティクル数(直進250・曲がり600・滞留100)と、
+#   - 地図規模に合わせた適応的パーティクル数(直進250・曲がり600)と、
 #     重みに基づくリサンプリングでの粒子数増減(resize_particle_set)。
 #   - 既知開始位置のクリック登録・再利用(start_positions.csv)、CSVフォルダ監視
 #     による自動再描画(CSVHandler)など、複数経路・複数試行を再現性高く比較する
@@ -316,7 +321,9 @@ EXCLUDED_CSV_NAMES = set()
 # ============================================================
 # 2. パーティクルフィルタのパラメータ
 # ============================================================
-# 移動様態に応じた適応型PFパラメータ
+# 移動様態に応じた適応型PFパラメータ。*_STOPPED(滞留)は、PFを歩を検出した時だけ更新し、
+# 移動様態の判定も歩ごとに行うので実際には使われない(冒頭の【移動様態判定】参照)。
+# JSONの必須項目なので値は読んで残している。
 N_PARTICLES_STRAIGHT = 250
 N_PARTICLES_TURNING = 600
 N_PARTICLES_STOPPED = 100
@@ -344,7 +351,7 @@ TURN_YAW_RATE_THRESHOLD = np.deg2rad(20.0)
 TURN_EXIT_YAW_RATE_THRESHOLD = np.deg2rad(10.0)
 PARTICLE_RESIZE_JITTER_PX = 0.50
 
-# [本研究独自] 不確実性適応粒子数。移動様態(直進/曲がり/滞留)による粒子数決定
+# [本研究独自] 不確実性適応粒子数。移動様態(直進/曲がり)による粒子数決定
 # (先行研究)に加えて、直前ステップの実効サンプルサイズ(Neff)を粒子数に対する比率
 # (neff_ratio = neff / 直前の粒子数)で見て、重みが少数の粒子に偏っている(不確実性が
 # 高い)場合は移動様態ベースの粒子数を割り増しし、重みがほぼ均等(不確実性が低い)
@@ -639,6 +646,8 @@ def safe_read_csv(file_path, max_retries=5, delay=0.2):
 
 
 # [先行研究:移動様態PF] 秋山ほか(FIT2013)の直進/屈折/滞留の3様態区分を踏襲。
+# 滞留は歩の検出の有無で決まり、歩が無い間はPFを更新しないので、STOPPEDは
+# detect_move_behavior()の結果としては現れない(冒頭の【移動様態判定】参照)。
 class MoveBehavior(Enum):
     """歩行者の移動様態。"""
     STOPPED = "stopped"
@@ -647,8 +656,9 @@ class MoveBehavior(Enum):
 
 
 # [先行研究:移動様態PF] 様態別に粒子数・ノイズ分散を変える考え方は秋山ほかに基づく。
-# 数値(直進250/曲がり600/滞留100)は原論文の直進10/屈折20から比率を保ちつつ、
+# 数値(直進250/曲がり600)は原論文の直進10/屈折20から比率を保ちつつ、
 # 本研究の対象地図(管理棟4階、複雑な廊下形状)向けに拡大した [本研究独自] 調整値。
+# STOPPEDの分岐(滞留100)は、STOPPEDが判定に現れないので通らない。
 def behavior_parameters(behavior):
     """移動様態に対応する粒子数・ノイズ分散を返す。"""
     if behavior == MoveBehavior.TURNING:
@@ -726,6 +736,9 @@ def detect_move_behavior(
     STRAIGHTからTURNINGへ移るには、方位変化とヨーレートの
     両条件を満たす必要がある。TURNINGからSTRAIGHTへ戻る際は、
     両方が十分小さくなったことを確認するヒステリシス判定を行う。
+
+    メインループは歩を検出した時だけ step_detected=True で呼ぶので、STOPPEDを返す
+    最初の分岐は実際には通らない(滞留は「歩が無い間はPFを更新しない」ことで扱う)。
     """
     if not step_detected:
         return MoveBehavior.STOPPED
@@ -1796,6 +1809,7 @@ def apply_map_config(args, config, config_path):
     adaptive_name = f"{config_name}:adaptive_pf"
     N_PARTICLES_STRAIGHT = int(require_config_value(adaptive, "particles_straight", adaptive_name))
     N_PARTICLES_TURNING = int(require_config_value(adaptive, "particles_turning", adaptive_name))
+    # *_stopped(滞留)は使われないが、既存のJSONとの互換のため必須項目のまま読む
     N_PARTICLES_STOPPED = int(require_config_value(adaptive, "particles_stopped", adaptive_name))
     SIGMA_STEP_STRAIGHT = float(require_config_value(adaptive, "sigma_step_straight_px", adaptive_name))
     SIGMA_STEP_TURNING = float(require_config_value(adaptive, "sigma_step_turning_px", adaptive_name))
@@ -2861,6 +2875,7 @@ def redraw_all_paths():
             if particle_count_history:
                 straight_count = behavior_history.count(MoveBehavior.STRAIGHT.value)
                 turning_count = behavior_history.count(MoveBehavior.TURNING.value)
+                # 滞留は判定に現れないので常に0(ログの形式を保つために残している)
                 stopped_count = behavior_history.count(MoveBehavior.STOPPED.value)
                 logging.info(
                     "  移動様態: "
