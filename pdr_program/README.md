@@ -34,7 +34,8 @@ PDR(歩行者自律測位)+移動様態適応型パーティクルフィルタ�
 
 ## `evaluation/` — 検証・実験(結果を出すもの)
 
-- `compare_route_source.py` — 経路制約モード・経路帯生成元の比較実験(サブプロセスで`pdr_pf_improved.py`を複数回実行)
+- `compare_route_source.py` — 経路制約モード・経路帯生成元の比較実験(サブプロセスで`pdr_pf_improved.py`を複数回実行)。
+  本体のログを読む`parse_log()`(全滅回数・最終位置・粒子数・処理時間など)は他の評価スクリプトと共用
 - `sensitivity_uncertainty_particles.py` — 不確実性適応粒子数パラメータの感度分析
 - `sensitivity_branch_likelihood.py` — 分岐仮説の選別尤度σの感度分析
 - `calibrate_step_length.py` — 歩幅校正ゲイン(`step_length_calibration_gain`)の再同定。
@@ -47,12 +48,16 @@ PDR(歩行者自律測位)+移動様態適応型パーティクルフィルタ�
 - `run_evaluation.py` — **卒論第7章の比較実験を一括実行する評価ハーネス**。計測一覧表の`eval`の行
   について、正解位置の作成→本体を「方式×シード」で実行→RMSE等の計算までを行い、方式別・ファイル別の
   表(平均±標準偏差)、箱ひげ図、軌跡図、実行条件の記録を`results/<日時>_evaluation[_tag]/`へ出す。
+  精度(RMSE・平均誤差・最大誤差・曲がり位置誤差)と計算量(平均粒子数・処理時間。本体のログの
+  「パーティクル数」「処理時間」の行)を表にし、方式Cと提案方式の記録ごとの差(E−C)の表も出す。
+  処理時間は計算機に依存するので、計算機の情報と測り方を`conditions.json`に残す。
   開始位置は経路の目印1番、初期方位は目印1→2の向きから自動で決め、経路名の書き間違いも確かめる。
   `--self-test`(架空データで本体を実際に動かす通し試験。本物の`start_positions.csv`・`results/`には書かない)あり
 - `measurement_list.py` — 計測一覧表(下記)を読む共通部品
 - `build_ground_truth.py` — 正解位置データ作成Phase 2(waypoints×landmarksをseq結合)
 - `evaluate_accuracy.py` — 推定軌跡と正解位置からRMSE等を計算。推定軌跡の時刻範囲外の正解点は外すが、
-  最後の歩から5秒以内に押した点(終点で止まってから押す目印)は最後の推定位置と比べて含める
+  最後の歩から5秒以内に押した点(終点で止まってから押す目印)は最後の推定位置と比べて含める。
+  経路が曲がる目印(前後の目印への向きが45度以上変わる目印)での平均誤差(曲がり位置誤差)も計算する
 - `verify_route_graph.py` — 通路グラフ(`build_skeleton_graph`/`simplify_skeleton_graph`)の可視化確認
 - `check_sensor_quality.py` — CSVごとの生センサーデータ品質を診断
 

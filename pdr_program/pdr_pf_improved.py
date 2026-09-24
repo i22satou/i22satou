@@ -10,7 +10,10 @@
 #               で決める。kanri_4f.jsonは従来と同じ10.0なので結果は不変。(2)全滅からの復帰を、
 #               移動前の平均の周りではなく「移動前の平均+この歩の移動量」の周りへまき直す
 #               ようにした(壁を通り抜けずに届く位置が足りなければ従来どおり)。全滅が起きた
-#               記録の結果は変わる。詳細はCHANGELOG.md。
+#               記録の結果は変わる。(3)計算量の記録として、歩ごとのPF更新(pf.update)と
+#               移動様態判定の実時間、推定処理全体の実時間を測り、ファイルごとにログへ出す
+#               (「処理時間(PF更新)」「処理時間(参考)」の2行)。推定結果・PNGは不変。
+#               詳細はCHANGELOG.md。
 # - 2026-09-18: [本研究独自] 卒論第7章の比較方式を実行できるようにした。方式A(PDRのみ)
 #               の軌跡CSV(--save-pdr-trajectory-csv)、方式B(固定粒子数PF、--pf-mode fixed)、
 #               軌跡CSVの保存先指定(--trajectory-dir)。既定の動作は不変。
@@ -2526,6 +2529,12 @@ def redraw_all_paths():
                 logging.info(f"[{file_name}] 有効なデータが少ないためスキップします。")
                 continue
 
+            # [本研究独自] 計算量の記録(2026-09-24)。CSV読み込みの後から全歩の処理が終わる
+            # までの実時間(推定処理全体)と、歩ごとのPF更新・移動様態判定の実時間を測る。
+            # 時刻を読むだけなので、乱数の消費や推定結果には影響しない。
+            estimation_start_time = time.perf_counter()
+            pf_update_seconds = []
+            behavior_seconds = []
             df['acc_mag']    = compute_acc_magnitude(df)
             df['step_acc']   = compute_step_acceleration(df['acc_mag'])
             # [本研究独自] ステップ検出の最短間隔を上限歩調から決めるため、CSVごとの
@@ -2729,6 +2738,7 @@ def redraw_all_paths():
                 #    引き戻されるため、必ず補正前に判定する。
                 sensor_step_heading = step_heading
                 previous_behavior = current_behavior
+                behavior_start_time = time.perf_counter()
                 current_behavior = detect_move_behavior(
                     df['timestamp'].to_numpy(),
                     heading_history,
@@ -2737,6 +2747,7 @@ def redraw_all_paths():
                     previous_behavior,
                     step_detected=True,
                 )
+                behavior_seconds.append(time.perf_counter() - behavior_start_time)
 
                 # 2. 曲がりを検出しても即時に経路を切り替えず、予定として保持する。
                 if (
@@ -2807,7 +2818,9 @@ def redraw_all_paths():
                 )
 
                 # 4. 移動様態に応じて粒子数・歩幅分散・方位分散を切り替えてPF更新。
+                pf_update_start_time = time.perf_counter()
                 pf.update(step_px, step_heading, current_behavior)
+                pf_update_seconds.append(time.perf_counter() - pf_update_start_time)
                 behavior_history.append(current_behavior.value)
                 particle_count_history.append(len(pf.particles))
                 step_timestamps.append(float(row['timestamp']))
@@ -2819,6 +2832,7 @@ def redraw_all_paths():
                 pdr_y += step_px * np.sin(sensor_step_heading)
                 pdr_positions.append((pdr_x, pdr_y))
 
+            estimation_seconds = time.perf_counter() - estimation_start_time
             estimated_positions = pf.estimated_positions
             extinction_count = pf.extinction_count
 
@@ -2857,6 +2871,19 @@ def redraw_all_paths():
                     f"平均={np.mean(particle_count_history):.1f}, "
                     f"最小={np.min(particle_count_history)}, "
                     f"最大={np.max(particle_count_history)}"
+                )
+                # [本研究独自] 計算量(2026-09-24)。方式の違いはすべてPF更新(pf.update)に入る
+                # ので、方式の比較にはPF更新の時間を使う。移動様態判定と推定処理全体は参考値
+                # (全方式共通の処理が大半)。キャッシュから返した場合は測っていないので出さない。
+                pf_update_ms = np.asarray(pf_update_seconds) * 1000.0
+                logging.info(
+                    "  処理時間(PF更新): 平均=%.3fms/歩, 中央値=%.3fms/歩, 合計=%.3f秒",
+                    np.mean(pf_update_ms), np.median(pf_update_ms), np.sum(pf_update_seconds),
+                )
+                logging.info(
+                    "  処理時間(参考): 移動様態判定 平均=%.3fms/歩, 推定処理全体 合計=%.3f秒"
+                    "(CSV読み込み・描画を除く)",
+                    np.mean(behavior_seconds) * 1000.0, estimation_seconds,
                 )
             if pf.valid_ratio_history:
                 logging.info(

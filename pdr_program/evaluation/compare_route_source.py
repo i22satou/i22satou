@@ -2,6 +2,10 @@
 # compare_route_source.py
 #
 # 【変更履歴】
+# - 2026-09-24: parse_log() が平均・最小・最大粒子数(particles_mean/min/max)と処理時間
+#               (pf_update_ms_mean/median、pf_update_total_s、behavior_ms_mean、
+#               estimation_total_s)も読むようにした(本体のログの新しい行)。キーを足した
+#               だけで、既存のキーとこのスクリプト・sensitivity_*.py の出力は変わらない。
 # - 2026-08-15: L字マップ(map_configs/l_map.json)など、kanri_4f.json以外の
 #               map_configでも使えるよう、EXPECTED_ENDPOINT_Xをmap_config別の
 #               既定値辞書+--expected-endpoint-x CLI引数に変更。既知の
@@ -97,6 +101,18 @@ DIAG_RE = re.compile(
     r"Neff平均=(?P<neff>[\d.]+), 位置分散平均=(?P<spread>[\d.]+)"
 )
 FINAL_RE = re.compile(r"最終推定位置: x=(?P<x>[-\d.]+), y=(?P<y>[-\d.]+)")
+PARTICLES_RE = re.compile(
+    r"パーティクル数: 平均=(?P<mean>[\d.]+), 最小=(?P<min>\d+), 最大=(?P<max>\d+)"
+)
+# 処理時間の行はキャッシュから返したファイルには出ない(その場合キーが無い)。
+PF_TIME_RE = re.compile(
+    r"処理時間\(PF更新\): 平均=(?P<mean>[\d.]+)ms/歩, 中央値=(?P<median>[\d.]+)ms/歩, "
+    r"合計=(?P<total>[\d.]+)秒"
+)
+REF_TIME_RE = re.compile(
+    r"処理時間\(参考\): 移動様態判定 平均=(?P<behavior>[\d.]+)ms/歩, "
+    r"推定処理全体 合計=(?P<total>[\d.]+)秒"
+)
 
 
 def run_condition(map_config, seed, heading_source, condition):
@@ -152,6 +168,23 @@ def parse_log(log_text):
         if m:
             pending["final_x"] = float(m.group("x"))
             pending["final_y"] = float(m.group("y"))
+            continue
+        m = PARTICLES_RE.search(line)
+        if m:
+            pending["particles_mean"] = float(m.group("mean"))
+            pending["particles_min"] = int(m.group("min"))
+            pending["particles_max"] = int(m.group("max"))
+            continue
+        m = PF_TIME_RE.search(line)
+        if m:
+            pending["pf_update_ms_mean"] = float(m.group("mean"))
+            pending["pf_update_ms_median"] = float(m.group("median"))
+            pending["pf_update_total_s"] = float(m.group("total"))
+            continue
+        m = REF_TIME_RE.search(line)
+        if m:
+            pending["behavior_ms_mean"] = float(m.group("behavior"))
+            pending["estimation_total_s"] = float(m.group("total"))
             continue
     flush()
     return rows

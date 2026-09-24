@@ -2,6 +2,10 @@
 # evaluate_accuracy.py
 #
 # 【変更履歴】
+# - 2026-09-24: [本研究独自] 曲がり位置誤差を追加した(turning_landmark_seqs()、
+#               evaluate_turning_points()、TURN_MIN_DEG)。経路の目印の並びで前後の目印への
+#               向きが45度以上変わる目印を「曲がる目印」とし、そこでの平均誤差を求める。
+#               evaluate() の結果(RMSE・平均誤差・最大誤差)は変えていない。
 # - 2026-09-24: [本研究独自] 最後の歩から5秒以内に押した正解点(終点で立ち止まってから
 #               押す目印)を、最後の推定位置に止まっているとみなして評価に含めるようにした
 #               (END_HOLD_SEC、--end-hold-sec)。これまでは時刻範囲外として外れていた。
@@ -30,8 +34,9 @@
 #   timestamp, x_px, y_px[, point_type]
 #   ・timestamp: 推定軌跡CSVと同じ基準の時刻(pdr_log_*.csvのtimestamp列と同じ単位)。
 #   ・x_px, y_px: 地図画像上のピクセル座標。
-#   ・point_type: 任意。start/turn/end等のラベル(曲がり位置誤差の計算に使う予定、
-#     現時点では未使用)。
+#   ・point_type: 任意。start/corner/end等のラベル。曲がり位置誤差の対象は point_type では
+#     なく、目印の並びの向きの変化で決める(TURN_MIN_DEG のコメント参照)。
+#   ・seq: 任意。経路の目印の番号(build_ground_truth.py が付ける)。曲がり位置誤差に使う。
 #
 # 【使い方】
 #   python evaluation/evaluate_accuracy.py --self-test
@@ -63,6 +68,16 @@ REQUIRED_COLUMNS = ["timestamp", "x_px", "y_px"]
 # スタート(地点マーク1番)は歩き始める前に押すので、今までどおり範囲外として外れる
 # (開始位置は既知なので、含めると全方式で誤差0の点が増えるだけになる)。
 END_HOLD_SEC = 5.0
+
+# [本研究独自] 曲がり位置誤差の対象にする「曲がる目印」のしきい値[度](2026-09-24)。
+# 経路の目印の並びで「前の目印→この目印」と「この目印→次の目印」の向きがこれ以上変わる
+# 目印を曲がる目印とする(最初と最後の目印は対象外)。point_type の corner は「見分けやすい
+# 角」という意味で、経路が曲がるとは限らない(L02 は階段ホールの端で、経路はまっすぐ)ので
+# 使わない。kanri_4f の評価用の経路(east_std・east_short・west_reverse)では、東→北の曲がり
+# (約90度)が L05(75.3度)と L06(63.5度)の2点に分かれ、他の目印は最大11.7度なので、
+# その間の45度で分けた。向きは隣の目印で決まるので、目印の置き方が違う経路では結果が
+# 変わりうる(rehearsal では L06 の次に L07 があるため L06 が43.7度になり、対象外になる)。
+TURN_MIN_DEG = 45.0
 
 
 def load_trajectory_csv(path):
@@ -154,6 +169,53 @@ def summarize_errors(errors, scale_px_per_m=None):
     return summary
 
 
+def turning_landmark_seqs(landmarks_df, min_turn_deg=TURN_MIN_DEG):
+    """経路の目印表(seq, x_px, y_px)から、経路が曲がる目印を {seq: 向きの変化[度]} で返す。
+    最初と最後の目印と、前後の目印と同じ位置にある目印は対象外。"""
+    ordered = landmarks_df.sort_values("seq")
+    xy = ordered[["x_px", "y_px"]].to_numpy(dtype=float)
+    seqs = ordered["seq"].to_numpy()
+    turns = {}
+    for k in range(1, len(xy) - 1):
+        before, after = xy[k] - xy[k - 1], xy[k + 1] - xy[k]
+        if np.hypot(*before) == 0 or np.hypot(*after) == 0:
+            continue
+        change = np.degrees(np.arctan2(after[1], after[0]) - np.arctan2(before[1], before[0]))
+        change = abs((change + 180.0) % 360.0 - 180.0)
+        if change >= min_turn_deg:
+            turns[int(seqs[k])] = float(change)
+    return turns
+
+
+def evaluate_turning_points(estimated_csv, ground_truth_csv, turn_seqs, scale_px_per_m=None,
+                            end_hold_sec=END_HOLD_SEC):
+    """曲がる目印(turn_seqs、正解位置CSVのseq)だけの平均誤差(曲がり位置誤差)を返す。
+    時刻の突き合わせは evaluate() と同じなので、各点の誤差はRMSEの計算に使う誤差と同じ値。
+    対象の点が無い・全部時刻範囲外のときは件数0・誤差NaN(エラーにしない)。"""
+    est_t, est_p = load_trajectory_csv(estimated_csv)
+    gt = pd.read_csv(ground_truth_csv)
+    if "seq" not in gt.columns:
+        raise ValueError(f"{ground_truth_csv}: 曲がり位置誤差には seq 列が必要です。")
+    target = gt[gt["seq"].isin([int(s) for s in turn_seqs])].sort_values("timestamp")
+    result = {"turn_n_points": 0, "turn_excluded_points": 0, "turn_mean_error_px": float("nan")}
+    if scale_px_per_m:
+        result["turn_mean_error_m"] = float("nan")
+    if target.empty:
+        return result
+    aligned_est, aligned_gt, excluded, _held = align_by_timestamp(
+        est_t, est_p, target["timestamp"].to_numpy(dtype=float),
+        target[["x_px", "y_px"]].to_numpy(dtype=float), end_hold_sec=end_hold_sec)
+    result["turn_excluded_points"] = excluded
+    if len(aligned_gt) == 0:
+        return result
+    errors = compute_position_errors(aligned_est, aligned_gt)
+    result["turn_n_points"] = int(len(errors))
+    result["turn_mean_error_px"] = compute_mean_error(errors)
+    if scale_px_per_m:
+        result["turn_mean_error_m"] = result["turn_mean_error_px"] / scale_px_per_m
+    return result
+
+
 def evaluate(estimated_csv, ground_truth_csv, scale_px_per_m=None, end_hold_sec=END_HOLD_SEC):
     """2つのCSVパスから誤差指標を計算して辞書で返す。"""
     est_t, est_p = load_trajectory_csv(estimated_csv)
@@ -235,7 +297,41 @@ def _self_test():
         print("  -> 終点で止まってから押した点を含め、遅すぎる点と歩き始める前の点は外した。")
     else:
         print("  -> 最後の歩の後の点の扱いが想定と違います。実装を確認してください。")
-    return ok and hold_ok
+
+    # 曲がり位置誤差(2026-09-24)。目印1→6の並び: 東へ2区間(2番は point_type=corner だが
+    # まっすぐ)、3番で90度曲がって南へ、5番で30度だけ向きを変える。曲がる目印は3番だけ。
+    # 推定軌跡は3番の時刻だけ30px、4番の時刻だけ10pxずれているので、曲がり位置誤差は30px、
+    # RMSE(6点)は sqrt((30^2+10^2)/6)。
+    landmarks = pd.DataFrame({"seq": [1, 2, 3, 4, 5, 6],
+                              "point_type": ["start", "corner", "wall", "wall", "wall", "end"],
+                              "x_px": [0.0, 100.0, 200.0, 200.0, 200.0, 250.0],
+                              "y_px": [0.0, 0.0, 0.0, 100.0, 200.0, 287.0]})
+    turns = turning_landmark_seqs(landmarks)
+    turn_est_t = np.arange(6.0)
+    turn_est_p = landmarks[["x_px", "y_px"]].to_numpy(float).copy()
+    turn_est_p[2] += [30.0, 0.0]
+    turn_est_p[3] += [0.0, 10.0]
+    with tempfile.TemporaryDirectory() as td:
+        est_path, gt_path = Path(td) / "est.csv", Path(td) / "gt.csv"
+        pd.DataFrame({"timestamp": turn_est_t, "x_px": turn_est_p[:, 0],
+                      "y_px": turn_est_p[:, 1]}).to_csv(est_path, index=False)
+        landmarks.assign(timestamp=turn_est_t).to_csv(gt_path, index=False)
+        turn = evaluate_turning_points(est_path, gt_path, turns, scale_px_per_m=10.0)
+        whole = evaluate(est_path, gt_path, scale_px_per_m=10.0)
+        empty = evaluate_turning_points(est_path, gt_path, {}, scale_px_per_m=10.0)
+    turn_ok = (list(turns) == [3] and abs(turns[3] - 90.0) < 1e-9
+               and turn["turn_n_points"] == 1 and abs(turn["turn_mean_error_px"] - 30.0) < 1e-9
+               and abs(turn["turn_mean_error_m"] - 3.0) < 1e-9
+               and abs(whole["rmse_px"] - np.sqrt((30.0 ** 2 + 10.0 ** 2) / 6)) < 1e-9
+               and empty["turn_n_points"] == 0 and np.isnan(empty["turn_mean_error_px"]))
+    print(f"  曲がる目印: {sorted(turns)}(向きの変化 {', '.join(f'{v:.0f}度' for v in turns.values())})"
+          f"、曲がり位置誤差 {turn['turn_mean_error_px']:.1f}px({turn['turn_n_points']}点)")
+    if turn_ok:
+        print("  -> 向きが45度以上変わる目印だけを選び、その点の誤差を平均した"
+              "(point_type=corner でもまっすぐな点と、30度の曲がりは対象外)。")
+    else:
+        print("  -> 曲がり位置誤差の計算が想定と違います。実装を確認してください。")
+    return ok and hold_ok and turn_ok
 
 
 def main():

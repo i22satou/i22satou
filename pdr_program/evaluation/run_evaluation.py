@@ -2,6 +2,13 @@
 # run_evaluation.py
 #
 # 【変更履歴】
+# - 2026-09-24: 計算量と曲がり位置誤差を加えた。(1)本体のログから平均・最小・最大粒子数と
+#               処理時間(PF更新・移動様態判定・推定処理全体)を読み、results_long.csv の列と
+#               計算量の表(table_cost_by_method[_file].csv)にした。処理時間は計算機に依存するので、
+#               conditions.json に計算機の情報(machine)と測り方(timing_definition)を残す。
+#               (2)曲がる目印(evaluate_accuracy.py の TURN_MIN_DEG)での平均誤差を、RMSEの表に
+#               「曲がり位置誤差」として加えた。(3)方式Cと提案方式の記録ごとの比較
+#               (table_C_vs_E_rmse.csv / table_C_vs_E_turn_error.csv)を加えた。既存の値は不変。
 # - 2026-09-24: 終点で止まってから押した正解点を評価に含める変更(evaluate_accuracy.py の
 #               END_HOLD_SEC)に合わせ、その件数を表・注意書き・conditions.json に残すようにした。
 #               自己テストに「止まってから押す」場面を追加。
@@ -33,24 +40,34 @@
 #    初期方位ごとにCSVのコピーを一時フォルダへ分けて実行する(元のCSVには触れない)。
 #    PDRのみ(方式A)は乱数を使わないので、各実行が出す同じ軌跡を1つ使う(全実行で
 #    一致することも確かめる)。
-# 4. evaluate_accuracy.py の関数でRMSE・平均誤差・最大誤差を計算し、表と図にまとめる。
+# 4. evaluate_accuracy.py の関数でRMSE・平均誤差・最大誤差・曲がり位置誤差を計算し、表と図に
+#    まとめる。本体のログから平均粒子数と処理時間も読んで、計算量の表にする。
 #
 # 【出力】results/<日時>_evaluation[_tag]/
-#   table_by_method.csv       方式別。全ファイル×全シードの平均±標準偏差
+#   table_by_method.csv       方式別。全ファイル×全シードの平均±標準偏差(RMSE・平均誤差・
+#                             最大誤差・曲がり位置誤差)
 #   table_by_method_file.csv  方式別・ファイル別。シード間の平均±標準偏差
 #                             (方式Aは乱数を使わないので1ファイル1値)
+#   table_cost_by_method.csv / table_cost_by_method_file.csv
+#                             計算量(平均粒子数・処理時間)。正解位置が無くても出す。方式Aは空欄
+#   table_C_vs_E_rmse.csv / table_C_vs_E_turn_error.csv
+#                             記録ごとの方式Cと提案方式の差(シード平均のE−C)と、改善した記録の
+#                             数・差の平均と標準偏差(検定はしない)
 #   table_diagnostics.csv     方式別・ファイル別の全滅回数・最終位置(正解位置が無くても出す。
 #                             精度の指標ではない)
-#   results_long.csv          1実行・1ファイルごとの全数値(全滅回数・最終位置も)
+#   results_long.csv          1実行・1ファイルごとの全数値(全滅回数・最終位置・粒子数・処理時間も)
 #   boxplot_rmse.png / boxplot_rmse_by_file.png / trajectory_<CSV名>.png
 #   conditions.json           実行条件(gitのコミット番号、各方式のオプション、ファイル別の
-#                             開始位置・初期方位・経路確認の結果、失敗した実行)
+#                             開始位置・初期方位・経路確認の結果・曲がる目印、失敗した実行、
+#                             計算機の情報、処理時間と平均粒子数の定義)
 #   used_map_config.json / measurement_list.csv  使った設定JSONと一覧表のコピー
 #   ground_truth/             作った正解位置CSV
 #   runs/<方式>/seed-<シード>/  本体の各実行のPNG・ログ・軌跡CSV
 #
 # 【注意】
-# - 正解位置の無い記録は表・箱ひげ図に入れない。
+# - 正解位置の無い記録は精度の表・箱ひげ図に入れない(計算量の表には入れる)。
+# - 処理時間は方式×シードを1つずつ順番に実行して測る(並列にしない)。同じ計算機・同じ実行の
+#   中でだけ比べられる。
 # - --self-test は架空データで本体を実際に動かす通し試験。本体のコピーを一時フォルダで
 #   動かすので、本物の start_positions.csv と results/ には書き込まない。架空データから
 #   出た数値は研究結果ではない(CLAUDE.md)。
@@ -68,6 +85,7 @@ import json
 import logging
 import math
 import os
+import platform
 import shutil
 import subprocess
 import sys
@@ -93,7 +111,8 @@ import pdr_pf_improved as pdrmod  # noqa: E402
 from build_ground_truth import build_ground_truth, load_landmarks, load_waypoints  # noqa: E402
 from calibrate_step_length import git_revision  # noqa: E402
 from compare_route_source import parse_log  # noqa: E402
-from evaluate_accuracy import END_HOLD_SEC, evaluate  # noqa: E402
+from evaluate_accuracy import (  # noqa: E402
+    END_HOLD_SEC, TURN_MIN_DEG, evaluate, evaluate_turning_points, turning_landmark_seqs)
 from measurement_list import load_measurement_list, resolve_csv_path  # noqa: E402
 
 RESULTS_DIR = PROGRAM_DIR / "results"
@@ -146,7 +165,40 @@ METHODS = [
      "kind": "variant", "args": condition_args(**PROPOSED, rooms=True, centerline=True)},
 ]
 METHOD_KEYS = [m["key"] for m in METHODS]
-METRICS = [("rmse_m", "RMSE"), ("mean_error_m", "平均誤差"), ("max_error_m", "最大誤差")]
+METRICS = [("rmse_m", "RMSE"), ("mean_error_m", "平均誤差"), ("max_error_m", "最大誤差"),
+           ("turn_mean_error_m", "曲がり位置誤差")]
+TURN_COLUMNS = ["turn_n_points", "turn_mean_error_m", "turn_mean_error_px"]
+# 本体のログから読む計算量(compare_route_source.parse_log のキー)。方式AはPFを使わないので空欄。
+COST_COLUMNS = ["particles_mean", "particles_min", "particles_max", "pf_update_ms_mean",
+                "pf_update_ms_median", "pf_update_total_s", "behavior_ms_mean",
+                "estimation_total_s"]
+COST_METRICS = [  # 計算量の表に出す値: 列名, 見出し, 小数の桁
+    ("particles_mean", "平均粒子数", 1),
+    ("pf_update_ms_mean", "PF更新時間[ms/歩]", 3),
+    ("pf_update_ms_median", "PF更新時間の中央値[ms/歩]", 3),
+    ("pf_update_total_s", "PF更新時間の合計[秒/本]", 3),
+    ("behavior_ms_mean", "移動様態判定の時間[ms/歩](参考)", 3),
+    ("estimation_total_s", "推定処理全体の時間[秒/本](参考)", 3),
+]
+TIMING_DEFINITION = (
+    "本体(pdr_pf_improved.py)の中で time.perf_counter() による実時間を測る。"
+    "PF更新時間 = 各歩の pf.update() の呼び出し1回の時間(移動様態に応じた粒子数とノイズの切り替え、"
+    "予測、壁・経路の尤度、リサンプリング、不確実性適応、複数経路仮説、全滅からの復帰を含む)。"
+    "方式の違いはすべてここに入るので、方式の比較にはこれを使う。ファイルごとに歩の平均・中央値[ms/歩]と"
+    "合計[秒]を出す(平均と合計は全滅からの復帰の歩を含み、中央値は通常の歩の値に近い)。"
+    "参考: 移動様態判定の時間 = 各歩の detect_move_behavior() の時間(方式B・C・Eとも同じ関数を呼ぶ)。"
+    "推定処理全体の時間 = CSVを読み込んだ後から全歩の処理が終わるまで(センサーの前処理・歩の検出・"
+    "方位の計算・PF更新・PDRのみの積算を含み、CSVと地図の読み込み・経路帯の自動抽出・描画・保存は含まない)。"
+    "表の値は、1実行・1ファイルの値の平均±標本標準偏差。")
+PARTICLES_DEFINITION = (
+    "各歩の pf.update() の直後の粒子数を、ファイルの全歩で平均した値(本体のログの"
+    "「パーティクル数: 平均」)。表の値は、1実行・1ファイルの値の平均±標本標準偏差。"
+    "最小・最大は全実行・全歩での最小値・最大値。")
+TURN_ERROR_DEFINITION = (
+    f"経路の目印の並び(ground_truth/routes.json から作った目印表のseq順)で、前の目印→この目印と"
+    f"この目印→次の目印の向きが{TURN_MIN_DEG:g}度以上変わる目印を「曲がる目印」とし(最初と最後の"
+    "目印は対象外)、その点での位置誤差の平均を1実行・1ファイルの曲がり位置誤差とする。時刻の"
+    "突き合わせはRMSEと同じ。表の値は、その平均±標本標準偏差。")
 
 # 図の色。軌跡図は3色まで(全組合せで色覚多様性の検証を通る範囲)にし、方式Aは
 # 灰色の破線で区別する。箱ひげ図は方式を軸ラベルで示し、色は「4方式/変種」の区別だけ。
@@ -250,7 +302,8 @@ def prepare_items(rows, data_dir, landmarks_dir, prefix, pf_map, scale, excluded
         where = row["file"]
         item = {"file": row["file"], "name": path.name, "stem": path.stem, "path": path,
                 "route": row["route"] or None, "warnings": [], "memo": row["memo"],
-                "ground_truth_df": None, "route_check": None}
+                "ground_truth_df": None, "route_check": None, "turns": {},
+                "turn_landmarks": []}
         if not path.exists():
             errors.append(f"{where}: ファイルが見つからない ({path})")
             continue
@@ -274,6 +327,12 @@ def prepare_items(rows, data_dir, landmarks_dir, prefix, pf_map, scale, excluded
             if len(points) < 2:
                 errors.append(f"{where}: 経路 {item['route']} の目印が2点未満で向きを決められない")
                 continue
+            # 曲がり位置誤差の対象にする「曲がる目印」(evaluate_accuracy.py の TURN_MIN_DEG)
+            item["turns"] = turning_landmark_seqs(landmarks)
+            labels = landmarks.set_index("seq")["label"]
+            item["turn_landmarks"] = [{"seq": seq, "label": str(labels.get(seq, "")),
+                                       "turn_deg": round(deg, 1)}
+                                      for seq, deg in item["turns"].items()]
 
         # 初期方位: 一覧表に書いてあればそれ、無ければ経路の目印1→2の向き
         if not math.isnan(row["start_heading_deg"]):
@@ -446,6 +505,16 @@ def collect_results(items, methods, seeds, diag, ctx):
             "n_points", "excluded_points", "held_end_points", "rmse_m", "mean_error_m",
             "max_error_m",
             "rmse_px", "mean_error_px", "max_error_px")})
+        # 曲がり位置誤差。曲がる目印が無い経路は件数0・空欄
+        row["turn_n_points"] = 0
+        if item["turns"]:
+            logging.disable(logging.WARNING)
+            try:
+                turn = evaluate_turning_points(trajectory, item["ground_truth"], item["turns"],
+                                               scale_px_per_m=ctx["scale"])
+            finally:
+                logging.disable(logging.NOTSET)
+            row.update({k: turn[k] for k in TURN_COLUMNS})
 
     for item in items:
         pdr_digest = None
@@ -456,6 +525,7 @@ def collect_results(items, methods, seeds, diag, ctx):
                 d = diag.get((method["key"], seed, item["name"]), {})
                 row.update({"steps": d.get("steps"), "extinctions": d.get("extinctions"),
                             "final_x": d.get("final_x"), "final_y": d.get("final_y")})
+                row.update({c: d.get(c) for c in COST_COLUMNS})
                 found = sorted(run_dir.glob(f"{item['stem']}_traj_*_seed-{seed}.csv"))
                 if len(found) != 1:
                     row["error"] = "推定軌跡CSVが無い(実行の失敗か、歩数0でスキップ)"
@@ -489,9 +559,12 @@ def collect_results(items, methods, seeds, diag, ctx):
 
     df = pd.DataFrame(rows)
     df["method_key"] = pd.Categorical(df["method_key"], categories=METHOD_KEYS, ordered=True)
-    for column in [c for c, _ in METRICS] + ["trajectory", "excluded_points", "held_end_points"]:
+    for column in ([c for c, _ in METRICS] + ["trajectory", "excluded_points", "held_end_points"]
+                   + TURN_COLUMNS + COST_COLUMNS):
         if column not in df.columns:
             df[column] = np.nan
+    for column in COST_COLUMNS + TURN_COLUMNS:  # ログに無い値(None)をNaNにそろえる
+        df[column] = pd.to_numeric(df[column], errors="coerce")
     if df["excluded_points"].fillna(0).sum() > 0:
         per_file = df.groupby("file")["excluded_points"].max().dropna()
         notes.append("推定軌跡の時刻範囲外で評価から外した正解点(ファイルごとの最大): "
@@ -543,7 +616,96 @@ def summarize(df, keys):
         mean, std = grouped[column].mean(), grouped[column].std(ddof=1)
         out[f"{label}[m] 平均±標準偏差"] = [format_mean_std(a, b) for a, b in zip(mean, std)]
         out[f"{column}_mean"], out[f"{column}_std"] = mean, std
+    # 曲がる目印が無い経路・時刻範囲外の実行は曲がり位置誤差が空欄なので、件数を別に示す
+    out.insert(out.columns.get_loc("曲がり位置誤差[m] 平均±標準偏差"), "曲がり位置誤差のn",
+               grouped["turn_mean_error_m"].count())
     return out.reset_index()
+
+
+def summarize_cost(df, keys):
+    """平均粒子数と処理時間(計算量)の平均±標本標準偏差。正解位置の有無によらず全記録を使う。
+    方式AはPFを使わない(PFの実行の中で一緒に積算する)ので空欄。"""
+    grouped = df.groupby(keys, observed=True, sort=True)
+    out = grouped.size().rename("n").to_frame()
+    first = grouped.first()
+    out.insert(0, "方式", first["method"])
+    out.insert(1, "卒論", first["section"])
+    out.insert(2, "区分", first["kind"].map({"main": "比較する4方式", "variant": "提案方式の変種"}))
+    for column, label, digits in COST_METRICS:
+        mean, std = grouped[column].mean(), grouped[column].std(ddof=1)
+        out[f"{label} 平均±標準偏差"] = [format_mean_std(a, b, digits) for a, b in zip(mean, std)]
+        if column == "particles_mean":
+            out["最小粒子数"] = grouped["particles_min"].min()
+            out["最大粒子数"] = grouped["particles_max"].max()
+    for column, _label, _digits in COST_METRICS:
+        out[f"{column}_mean"], out[f"{column}_std"] = grouped[column].mean(), grouped[column].std(ddof=1)
+    return out.reset_index()
+
+
+def compare_c_vs_e(df, column, label):
+    """記録(CSV)ごとに、シードで平均した値の差(提案方式 − 方式C)を並べる。両方の値がある
+    記録だけ。最後の行に、改善した(差が負の)記録の数と差の平均・標本標準偏差を置く。検定はしない。
+    対象の記録が無ければNone。"""
+    base, target = "C_adaptive", "E_proposed"
+    sub = df[df["method_key"].isin([base, target]) & df[column].notna()]
+    if sub.empty:
+        return None
+    stats = sub.groupby(["file", "method_key"], observed=True)[column].agg(["mean", "count"])
+    means, counts = stats["mean"].unstack(), stats["count"].unstack()
+    if base not in means.columns or target not in means.columns:
+        return None
+    means = means[[base, target]].dropna()
+    if means.empty:
+        return None
+    diff = means[target] - means[base]
+    routes = sub.groupby("file")["route"].first()
+    table = pd.DataFrame({
+        "file": means.index, "route": routes.reindex(means.index).to_numpy(),
+        "方式Cのシード数": counts.loc[means.index, base].astype(int).to_numpy(),
+        "提案方式のシード数": counts.loc[means.index, target].astype(int).to_numpy(),
+        f"方式C: 移動様態適応PF {label}[m]": means[base].to_numpy(),
+        f"提案方式 {label}[m]": means[target].to_numpy(),
+        "差(E-C)[m]": diff.to_numpy(),
+        "差の標準偏差[m]": np.nan,
+        "判定": np.where(diff < 0, "改善", np.where(diff > 0, "悪化", "同じ")),
+    })
+    summary = {"file": f"全{len(diff)}記録のまとめ", "差(E-C)[m]": diff.mean(),
+               "差の標準偏差[m]": diff.std(ddof=1) if len(diff) > 1 else np.nan,
+               "判定": f"改善 {int((diff < 0).sum())}/{len(diff)}記録"}
+    table = pd.concat([table, pd.DataFrame([summary])], ignore_index=True)
+    for column in ("方式Cのシード数", "提案方式のシード数"):  # まとめの行が空欄なので整数型を保つ
+        table[column] = table[column].astype("Int64")
+    return table
+
+
+def cpu_name():
+    """CPU名(取れなければ platform.processor() の値)。"""
+    try:
+        if sys.platform == "win32":
+            import winreg
+            with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE,
+                                r"HARDWARE\DESCRIPTION\System\CentralProcessor\0") as key:
+                return str(winreg.QueryValueEx(key, "ProcessorNameString")[0]).strip()
+        if sys.platform == "darwin":
+            out = subprocess.run(["sysctl", "-n", "machdep.cpu.brand_string"],
+                                 capture_output=True, text=True, timeout=5)
+            if out.returncode == 0 and out.stdout.strip():
+                return out.stdout.strip()
+        else:
+            for line in Path("/proc/cpuinfo").read_text(encoding="utf-8").splitlines():
+                if line.lower().startswith("model name"):
+                    return line.split(":", 1)[1].strip()
+    except (OSError, subprocess.SubprocessError, ImportError):
+        pass
+    return platform.processor() or "不明"
+
+
+def machine_info(python):
+    """処理時間は計算機に依存するので、測った計算機と実行のしかたを残す。"""
+    return {"cpu": cpu_name(), "logical_cpus": os.cpu_count(),
+            "os": platform.platform(), "python": platform.python_version(),
+            "python_executable": str(python), "numpy": np.__version__,
+            "execution": "方式×シードを1つずつ順番に実行(並列にしない)。同じ計算機の他の負荷は制御していない"}
 
 
 def style_axes(ax):
@@ -723,6 +885,9 @@ def run_evaluation(list_path, data_dir, map_config, out_root=RESULTS_DIR, tag=No
     for item in items:
         print(f"  {item['name']}: 経路={item['route'] or '未定義'} 開始位置=({item['start'][0]:.1f}, "
               f"{item['start'][1]:.1f}) 初期方位={item['heading_deg']:g}度 / {item['gt_status']}")
+        if item["turn_landmarks"]:
+            print("    曲がる目印: " + ", ".join(f"{t['seq']}番 {t['label']}({t['turn_deg']:g}度)"
+                                            for t in item["turn_landmarks"]))
         for warning in item["warnings"]:
             print(f"    [警告] {warning}")
     runs, diag = run_program(items, methods, seeds, ctx)
@@ -736,6 +901,14 @@ def run_evaluation(list_path, data_dir, map_config, out_root=RESULTS_DIR, tag=No
         tables["table_diagnostics"].insert(0, "注意", "架空データ(研究結果ではない)")
     tables["table_diagnostics"].to_csv(out_dir / "table_diagnostics.csv", index=False,
                                        encoding="utf-8-sig", float_format="%.4f")
+    for name, keys in (("table_cost_by_method", ["method_key"]),
+                       ("table_cost_by_method_file", ["method_key", "file"])):
+        table = summarize_cost(df, keys)
+        if synthetic:
+            table.insert(0, "注意", "架空データ(研究結果ではない)")
+        table.to_csv(out_dir / f"{name}.csv", index=False, encoding="utf-8-sig",
+                     float_format="%.4f")
+        tables[name] = table
     if df["has_ground_truth"].any() and df["rmse_m"].notna().any():
         for name, keys in (("table_by_method", ["method_key"]),
                            ("table_by_method_file", ["method_key", "file"])):
@@ -746,8 +919,19 @@ def run_evaluation(list_path, data_dir, map_config, out_root=RESULTS_DIR, tag=No
                          float_format="%.4f")
             tables[name] = table
         plot_boxplots(df, methods, out_dir, title_prefix)
+        for name, column, label in (("table_C_vs_E_rmse", "rmse_m", "RMSE"),
+                                    ("table_C_vs_E_turn_error", "turn_mean_error_m", "曲がり位置誤差")):
+            table = compare_c_vs_e(df[df["has_ground_truth"]], column, label)
+            if table is None:
+                notes.append(f"方式Cと提案方式の両方で{label}のある記録が無いので、{name}.csv は作っていない")
+                continue
+            if synthetic:
+                table.insert(0, "注意", "架空データ(研究結果ではない)")
+            table.to_csv(out_dir / f"{name}.csv", index=False, encoding="utf-8-sig",
+                         float_format="%.4f")
+            tables[name] = table
     else:
-        notes.append("正解位置のある記録が無いので、RMSEの表と箱ひげ図は作っていない")
+        notes.append("正解位置のある記録が無いので、RMSEの表・箱ひげ図・方式Cと提案方式の比較は作っていない")
     figure_seed = 42 if 42 in seeds else seeds[0]
     for item in items:
         plot_trajectories(item, df, binary, figure_seed, out_dir, title_prefix)
@@ -772,9 +956,19 @@ def run_evaluation(list_path, data_dir, map_config, out_root=RESULTS_DIR, tag=No
         "evaluation_rule": ("地点マークを押した時刻で推定軌跡を線形補間して正解位置と比べる。"
                             "推定軌跡の時刻範囲外の点は外す。ただし最後の歩から"
                             f"{END_HOLD_SEC:g}秒以内の点は最後の推定位置と比べて含める"),
+        "machine": machine_info(python),
+        "timing_definition": TIMING_DEFINITION,
+        "particles_definition": PARTICLES_DEFINITION,
+        "turn_error_definition": TURN_ERROR_DEFINITION,
+        "turn_min_deg": TURN_MIN_DEG,
         "table_definitions": {
             "table_by_method": "方式ごとに、正解位置のある全ファイル×全シードの値の平均±標本標準偏差",
             "table_by_method_file": "方式・ファイルごとに、シード間の平均±標本標準偏差(方式Aは1値)",
+            "table_cost_by_method": "方式ごとに、全ファイル×全シードの計算量の平均±標本標準偏差"
+                                    "(正解位置の無い記録も含む。方式Aは空欄)",
+            "table_cost_by_method_file": "方式・ファイルごとに、シード間の計算量の平均±標本標準偏差",
+            "table_C_vs_E": "記録ごとに、方式Cと提案方式のシード平均の差(E-C、負なら提案方式が小さい="
+                            "改善)。最後の行は改善した記録の数と差の平均・標本標準偏差。検定はしない",
         },
         "methods": [{k: m[k] for k in ("key", "label", "section", "kind", "args")}
                     for m in methods],
@@ -782,6 +976,7 @@ def run_evaluation(list_path, data_dir, map_config, out_root=RESULTS_DIR, tag=No
                    "start_xy": list(i["start"]), "start_from": i["start_from"],
                    "start_heading_deg": i["heading_deg"], "heading_from": i["heading_from"],
                    "ground_truth": i["gt_status"], "route_check": i["route_check"],
+                   "turning_landmarks": i["turn_landmarks"],
                    "warnings": i["warnings"], "memo": i["memo"]} for i in items],
         "failed_runs": failures,
         "notes": notes,
@@ -801,6 +996,21 @@ def print_report(result):
         view = table[["方式", "卒論", "n", "RMSE[m] 平均±標準偏差", "平均誤差[m] 平均±標準偏差",
                       "最大誤差[m] 平均±標準偏差"]]
         print(view.to_string(index=False))
+    for name, label in (("table_C_vs_E_rmse", "RMSE"), ("table_C_vs_E_turn_error", "曲がり位置誤差")):
+        table = result["tables"].get(name)
+        if table is not None:
+            last = table.iloc[-1]
+            print(f"\n=== 方式Cと提案方式の{label}(記録ごとのシード平均の差 E-C) ===")
+            print(table.drop(columns=[c for c in ("注意", "差の標準偏差[m]") if c in table.columns])
+                  .iloc[:-1].to_string(index=False))
+            std = last["差の標準偏差[m]"]
+            std_text = f"{std:.3f}m" if np.isfinite(std) else "—(記録が1本)"
+            print(f"  {last['判定']}、差の平均 {last['差(E-C)[m]']:+.3f}m、標準偏差 {std_text}")
+    cost = result["tables"].get("table_cost_by_method")
+    if cost is not None:
+        print("\n=== 計算量(方式別、全ファイル×全シード。処理時間は同じ計算機の中でだけ比べる) ===")
+        print(cost[["方式", "n", "平均粒子数 平均±標準偏差", "PF更新時間[ms/歩] 平均±標準偏差",
+                    "PF更新時間の中央値[ms/歩] 平均±標準偏差"]].to_string(index=False))
     for note in result["notes"]:
         print(f"[注意] {note}")
     if result["failures"]:
@@ -898,12 +1108,49 @@ def _self_test(keep_dir=None):
         decoy["x_px"] = np.concatenate([[100.0], 100.0 + np.cumsum(gaps)])
         decoy.to_csv(lm_dir / "kanri_4f_landmarks_selftest_decoy.csv", index=False)
 
+        # 曲がる架空の記録(2026-09-24、曲がり位置誤差の確認用)。下側廊下(y=230)を x=300 から
+        # 東へ歩き、x=約425で北へ曲がって上側廊下(y=約115)まで進み、また東へ歩く(本体の
+        # 設定の手動経路と同じ曲がり角)。各区間の歩数は本体の歩幅から、曲がり角に最も近い歩で
+        # 曲がるように決める。方位は各区間の最後の歩の直後に切り替える(曲がった次の1歩だけ
+        # 前の方位のサンプルが1つ混ざるので、PDRのみの軌跡は正解から少しずれる)。目印は歩いた
+        # 折れ線の上に置くので、曲がる目印は2つの曲がり角(向きの変化90度)だけになる。
+        turn_name, n_turn, turn_x0 = "pdr_log_9001_0004.csv", 30, 300.0
+        _write_synthetic_walk(data / turn_name, n_turn, 37.0, rng)
+        t_turn, cum_turn = _synthetic_truth(data / turn_name)
+        assert len(t_turn) == n_turn, len(t_turn)
+        first_end = int(np.argmin(np.abs(cum_turn - (425.0 - turn_x0))))
+        second_end = int(np.argmin(np.abs(cum_turn - cum_turn[first_end] - 115.0)))
+        # walking方式の基準方位(最初の10歩)を曲がる前に取り終え、最後の区間も数歩残す
+        assert first_end >= 10 and second_end <= n_turn - 6, (first_end, second_end)
+        walk = pd.read_csv(data / turn_name)
+        yaw = np.full(len(walk), 37.0)
+        yaw[walk["timestamp"].to_numpy() > t_turn[first_end]] = 37.0 - 90.0  # 北(地図の上)へ
+        yaw[walk["timestamp"].to_numpy() > t_turn[second_end]] = 37.0      # また東へ
+        walk["yaw_deg"] = yaw
+        walk.to_csv(data / turn_name, index=False)
+        headings = np.zeros(n_turn)
+        headings[first_end + 1:second_end + 1] = np.deg2rad(-90.0)
+        lengths = np.diff(np.r_[0.0, cum_turn])
+        turn_px = turn_x0 + np.cumsum(lengths * np.cos(headings))
+        turn_py = 230.0 + np.cumsum(lengths * np.sin(headings))
+        turn_marks = [first_end // 3, 2 * first_end // 3, first_end, (first_end + second_end) // 2,
+                      second_end, (second_end + n_turn - 1) // 2, n_turn - 1]
+        pd.DataFrame({"seq": range(1, len(turn_marks) + 2),
+                      "label": [f"t{i}" for i in range(len(turn_marks) + 1)], "point_type": "wall",
+                      "x_px": np.r_[turn_x0, turn_px[turn_marks]],
+                      "y_px": np.r_[230.0, turn_py[turn_marks]]}).to_csv(
+            lm_dir / "kanri_4f_landmarks_selftest_turn.csv", index=False)
+        pd.DataFrame({"timestamp": np.r_[t_turn[0] - 0.5, t_turn[turn_marks]],
+                      "seq": range(1, len(turn_marks) + 2)}).to_csv(
+            data / f"{Path(turn_name).stem}_waypoints.csv", index=False)
+
         list_path = td / "list.csv"
         list_path.write_text(
             "file,purpose,route,distance_m,speed,use,memo\n"
             "pdr_log_9001_0001.csv,eval,selftest_east,,,1,架空(東向き)\n"
             "pdr_log_9001_0002.csv,eval,selftest_east,,,1,架空(地点マーク無し)\n"
             "pdr_log_9001_0003.csv,eval,selftest_west,,,1,架空(西向き)\n"
+            "pdr_log_9001_0004.csv,eval,selftest_turn,,,1,架空(東→北→東に曲がる)\n"
             "calib/pdr_log_9001_0009.csv,calib,,30,slow,1,評価では読まない\n"
             "pdr_log_9001_0008.csv,eval,selftest_east,,,0,撮り直し(使わない)\n",
             encoding="utf-8")
@@ -923,17 +1170,21 @@ def _self_test(keep_dir=None):
         df, out_dir = result["df"], result["out_dir"]
         assert not result["failures"], result["failures"]
         assert not [n for n in result["notes"] if "PDRのみの軌跡が実行によって違う" in n], result["notes"]
-        print("  OK: 本体を全方式×2シード×2方向で実行でき、PDRのみの軌跡は全実行で同一")
+        print("  OK: 本体を全方式×2シード×4本で実行でき、PDRのみの軌跡は全実行で同一")
 
         registered = pd.read_csv(prog / "start_positions.csv").set_index("file_name")
-        for name, _, x0, _, _ in walks:
+        for name, _, x0, _, _ in walks + [(turn_name, None, turn_x0, None, None)]:
             assert abs(registered.loc[name, "start_x"] - x0) < 1e-6, registered
         print("  OK: 未登録の開始位置を目印1番から登録(一時フォルダの start_positions.csv)")
 
         pdr = df[(df["method_key"] == "A_pdr") & df["has_ground_truth"]]
-        assert len(pdr) == 2 and (pdr["rmse_m"] < 0.01).all(), pdr[["file", "rmse_m"]]
-        print(f"  OK: PDRのみのRMSEが東向き・西向きとも約0m(最大{pdr['rmse_m'].max():.4f}m)"
-              "= 時刻の突き合わせと初期方位(0度/180度)が正しい")
+        straight = pdr[pdr["file"] != turn_name]
+        turning = pdr[pdr["file"] == turn_name]
+        assert len(straight) == 2 and (straight["rmse_m"] < 0.01).all(), pdr[["file", "rmse_m"]]
+        assert len(turning) == 1 and (turning["rmse_m"] < 0.1).all(), turning[["file", "rmse_m"]]
+        print(f"  OK: PDRのみのRMSEが東向き・西向きとも約0m(最大{straight['rmse_m'].max():.4f}m)"
+              "= 時刻の突き合わせと初期方位(0度/180度)が正しい。曲がる記録も"
+              f"{turning['rmse_m'].iloc[0]:.4f}m(曲がった次の歩の方位の混ざり分だけ)")
 
         scored = df[df["has_ground_truth"]]
         west = scored[scored["file"] == "pdr_log_9001_0003.csv"]
@@ -944,26 +1195,83 @@ def _self_test(keep_dir=None):
         print("  OK: 終点で止まってから押した点(最後の歩の1.5秒後)を、最後の推定位置と比べて"
               "評価に含める。外れるのは歩き始める前に押した1番だけ")
 
+        # 曲がり位置誤差(2026-09-24): 曲がる目印は曲がる記録の2つの曲がり角(4番・6番)だけ
+        conditions = json.loads((out_dir / "conditions.json").read_text(encoding="utf-8"))
+        turn_file = [c for c in conditions["files"] if c["file"] == turn_name][0]
+        assert [t["seq"] for t in turn_file["turning_landmarks"]] == [4, 6], turn_file
+        assert all(abs(t["turn_deg"] - 90.0) < 1.0 for t in turn_file["turning_landmarks"]), turn_file
+        assert all(not c["turning_landmarks"] for c in conditions["files"] if c["file"] != turn_name)
+        turn_rows = scored[scored["file"] == turn_name]
+        assert (turn_rows["turn_n_points"] == 2).all(), turn_rows["turn_n_points"].tolist()
+        assert turn_rows["turn_mean_error_m"].notna().all(), turn_rows["turn_mean_error_m"].tolist()
+        others = scored[scored["file"] != turn_name]
+        assert (others["turn_n_points"] == 0).all() and others["turn_mean_error_m"].isna().all()
+        pdr_turn = turn_rows[turn_rows["method_key"] == "A_pdr"]["turn_mean_error_m"].iloc[0]
+        assert pdr_turn < 0.1, pdr_turn
+        print(f"  OK: 曲がる目印は曲がる記録の2つの曲がり角(90度)だけ。曲がり位置誤差は全方式で2点から"
+              f"計算し、まっすぐな記録では空欄。PDRのみは{pdr_turn:.4f}m")
+
         table = result["tables"]["table_by_method"]
         assert list(table["method_key"]) == METHOD_KEYS, table["method_key"].tolist()
-        expected_n = [2 if k == "A_pdr" else 4 for k in METHOD_KEYS]
+        expected_n = [3 if k == "A_pdr" else 6 for k in METHOD_KEYS]
         assert table["n"].tolist() == expected_n, table["n"].tolist()
+        expected_turn_n = [1 if k == "A_pdr" else 2 for k in METHOD_KEYS]
+        assert table["曲がり位置誤差のn"].tolist() == expected_turn_n, table["曲がり位置誤差のn"].tolist()
         no_gt = df[df["file"] == "pdr_log_9001_0002.csv"]
         assert (~no_gt["has_ground_truth"]).all() and no_gt["trajectory"].notna().all()
         assert "pdr_log_9001_0002.csv" not in set(result["tables"]["table_by_method_file"]["file"])
         print("  OK: 正解位置の無い記録は軌跡だけ出して表から外す。全8方式が表にそろう")
 
         diagnostics = pd.read_csv(out_dir / "table_diagnostics.csv")
-        assert len(diagnostics) == len(METHOD_KEYS) * 3, len(diagnostics)  # 8方式×3本
+        assert len(diagnostics) == len(METHOD_KEYS) * 4, len(diagnostics)  # 8方式×4本
+
+        # 計算量(2026-09-24): PFの方式は全実行で粒子数と処理時間が埋まり、方式Aは空欄
+        pf_rows = df[df["method_key"] != "A_pdr"]
+        pdr_rows = df[df["method_key"] == "A_pdr"]
+        for column in COST_COLUMNS:
+            assert (pf_rows[column] > 0).all(), (column, pf_rows[column].tolist())
+            assert pdr_rows[column].isna().all(), (column, pdr_rows[column].tolist())
+        assert ((pf_rows["particles_min"] <= pf_rows["particles_mean"])
+                & (pf_rows["particles_mean"] <= pf_rows["particles_max"])).all()
+        assert (pf_rows["estimation_total_s"] >= pf_rows["pf_update_total_s"]).all()
+        cost = result["tables"]["table_cost_by_method"]
+        cost_file = result["tables"]["table_cost_by_method_file"]
+        assert list(cost["method_key"]) == METHOD_KEYS and len(cost_file) == len(METHOD_KEYS) * 4
+        assert cost.loc[cost["method_key"] == "A_pdr", "particles_mean_mean"].isna().all()
+        assert cost.loc[cost["method_key"] != "A_pdr", "pf_update_ms_mean_mean"].gt(0).all()
+        machine = conditions["machine"]
+        assert all(machine.get(k) for k in ("cpu", "os", "python", "numpy", "execution")), machine
+        assert "perf_counter" in conditions["timing_definition"]
+        print(f"  OK: 平均粒子数と処理時間が全実行で埋まり(方式Aは空欄)、計算量の表と計算機の情報"
+              f"(CPU: {machine['cpu']})を残した")
+
+        # 方式Cと提案方式の記録ごとの比較(2026-09-24)
+        by_file = result["tables"]["table_by_method_file"].set_index(["method_key", "file"])
+        for name, column, n_files in (("table_C_vs_E_rmse", "rmse_m", 3),
+                                      ("table_C_vs_E_turn_error", "turn_mean_error_m", 1)):
+            cve = result["tables"][name]
+            rows_, last = cve.iloc[:-1], cve.iloc[-1]
+            assert len(rows_) == n_files, (name, len(rows_))
+            expected = [by_file.loc[("E_proposed", f), f"{column}_mean"]
+                        - by_file.loc[("C_adaptive", f), f"{column}_mean"] for f in rows_["file"]]
+            assert np.allclose(rows_["差(E-C)[m]"], expected), (name, rows_["差(E-C)[m]"].tolist())
+            assert abs(last["差(E-C)[m]"] - np.mean(expected)) < 1e-12
+            improved = int((np.array(expected) < 0).sum())
+            assert last["判定"] == f"改善 {improved}/{n_files}記録", last["判定"]
+            assert (np.isnan(last["差の標準偏差[m]"]) if n_files == 1
+                    else abs(last["差の標準偏差[m]"] - np.std(expected, ddof=1)) < 1e-12)
+        print("  OK: 方式Cと提案方式の差(E-C)を記録ごとに並べ、改善した記録の数と差の平均・標準偏差を"
+              "添えた(RMSEは3記録、曲がり位置誤差は曲がる記録の1記録)")
         pdr_final = df[(df["method_key"] == "A_pdr") & (df["file"] == "pdr_log_9001_0003.csv")]
         assert abs(pdr_final["final_x"].iloc[0] - (380.0 - cum_west[-1])) < 1e-6, pdr_final
         for name in ("table_by_method.csv", "table_by_method_file.csv", "results_long.csv",
-                     "table_diagnostics.csv",
+                     "table_diagnostics.csv", "table_cost_by_method.csv",
+                     "table_cost_by_method_file.csv", "table_C_vs_E_rmse.csv",
+                     "table_C_vs_E_turn_error.csv",
                      "boxplot_rmse.png", "boxplot_rmse_by_file.png", "conditions.json",
                      "used_map_config.json", "measurement_list.csv",
                      "trajectory_pdr_log_9001_0001.png", "trajectory_pdr_log_9001_0003.png"):
             assert (out_dir / name).exists(), name
-        conditions = json.loads((out_dir / "conditions.json").read_text(encoding="utf-8"))
         assert conditions["synthetic"] is True and "架空" in table["注意"].iloc[0]
         print("  OK: 表・箱ひげ図・軌跡図・実行条件を保存し、架空データであることを明記")
         if keep_dir is not None:
