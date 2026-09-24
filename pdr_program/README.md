@@ -47,13 +47,14 @@ PDR(歩行者自律測位)+移動様態適応型パーティクルフィルタ�
   `--self-test`(架空データで本体を実際に動かす通し試験。本物の`start_positions.csv`・`results/`には書かない)あり
 - `measurement_list.py` — 計測一覧表(下記)を読む共通部品
 - `build_ground_truth.py` — 正解位置データ作成Phase 2(waypoints×landmarksをseq結合)
-- `evaluate_accuracy.py` — 推定軌跡と正解位置からRMSE等を計算
+- `evaluate_accuracy.py` — 推定軌跡と正解位置からRMSE等を計算。推定軌跡の時刻範囲外の正解点は外すが、
+  最後の歩から5秒以内に押した点(終点で止まってから押す目印)は最後の推定位置と比べて含める
 - `verify_route_graph.py` — 通路グラフ(`build_skeleton_graph`/`simplify_skeleton_graph`)の可視化確認
 - `check_sensor_quality.py` — CSVごとの生センサーデータ品質を診断
 
 ## `tools/` — 準備・計測日に使う道具
 
-- `quick_check.py` — **計測当日その場で使う健全性判定**(歩数・歩調・平均歩幅・推定総距離・方位の正味回転・地点マークの整合)。撮り直しの要否をその場で決めるためのもの
+- `quick_check.py` — **計測当日その場で使う健全性判定**(歩数・歩調・平均歩幅・推定総距離・方位の正味回転・地点マークの整合)。撮り直しの要否をその場で決めるためのもの。方位の正味回転は歩行区間で測り、今ある経路の想定値はどれも0度(`--expected-net-rotation-deg 0`)
 - `make_route_landmarks.py` — 正解位置データ作成Phase 0(現行方式)。目印のマスター表と経路定義から、経路別landmarks CSVと「押す順番シート」を生成
 - `pick_landmarks.py` — 正解位置データ作成Phase 0の旧方式。**現在は使わない**(kanri_4fの二値地図は廊下沿いに開口が無くクリックできないため。詳細は`../memo/ground_truth.md`)
 - `map_binarizer.py` / `map_processing.py` — 建築平面図から2値地図を作る

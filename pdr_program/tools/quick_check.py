@@ -2,6 +2,14 @@
 # quick_check.py
 #
 # 【変更履歴】
+# - 2026-09-24: (1)方位の正味回転を記録全体の最初と最後の差ではなく、歩行区間(最初の5歩と
+#               最後の5歩の平均方位の差)で測るようにした。記録開始直後の方位の飛び
+#               (0805の1438は126度、1442は151度)を拾い、壊れた1438をOK・良好な1442を
+#               異常と判定していた。振れ幅・最大ジャンプも歩行区間で測る。想定値の説明
+#               「約-90または+90」は誤りで、今ある経路はどれも0度。
+#               (2)本体の前処理validate_log()の戻り値を使っていなかったのを修正。
+#               (3)終点の地点マークを最後の歩からEND_HOLD_SEC秒より後に押した場合に警告する
+#               (評価でその点が外れるため。evaluation/evaluate_accuracy.py)。
 # - 2026-09-03: [本研究独自] 新規作成。計測当日、学校にいるうちにCSVの健全性を
 #               判定して撮り直しの要否をその場で決めるための読み取り専用ツール。
 #
@@ -16,10 +24,11 @@
 #   1. 歩行の物理的妥当性(歩数・歩調・平均歩幅・推定総移動距離)
 #      2026-09-02の教訓「下流(PF・地図制約)を触る前に、推定総距離と歩調が物理的に
 #      妥当かを先に確認する」を、その場で適用できるようにするのが主目的。
-#   2. 方位の健全性(正味回転量・振れ幅・最大ジャンプ)
+#   2. 方位の健全性(歩行区間の正味回転量・振れ幅・最大ジャンプ)
 #      pdr_log_0805_1438.csv は歩行中に方位が正味+146度回っており、どの経路仮説でも
 #      説明できなかった。同種の記録をその場で弾く。
-#   3. 地点マーク(_waypoints.csv)の整合(seq数・本体CSVの時刻範囲に入っているか)
+#   3. 地点マーク(_waypoints.csv)の整合(seq数・本体CSVの時刻範囲に入っているか、
+#      終点のボタンを押すのが遅すぎないか)
 #   4. START直後の静止(計測手順が守られたか)
 #
 # 【設計方針】
@@ -29,12 +38,14 @@
 #
 # 【使い方】
 #   python tools/quick_check.py <pdr_log_XXXX.csv> [--expected-distance-m 89.3]
-#       [--expected-net-rotation-deg -90] [--landmarks ground_truth/..._east_std.csv]
+#       [--expected-net-rotation-deg 0] [--landmarks ground_truth/..._east_std.csv]
 #   python tools/quick_check.py --all          # data_dir の全CSVをまとめて判定
 #   python tools/quick_check.py --self-test    # 合成データで判定ロジックだけ確認
 #
 # 経路の想定距離(make_route_landmarks.py の出力より):
 #   east_std 89.3 m / east_short 71.6 m / west_reverse 71.8 m / rehearsal 89.5 m
+# 経路の想定正味回転: 今ある経路はどれも東→北→東(west_reverseは西→南→西)なので 0 度。
+#   校正用の直線歩行も 0 度。
 # ============================================================================
 
 import argparse
@@ -49,7 +60,9 @@ import pandas as pd
 # のある1つ上のpdr_program/を基準にする(2026-09-18のフォルダ整理)。
 PROGRAM_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROGRAM_DIR))
+sys.path.insert(0, str(PROGRAM_DIR / "evaluation"))
 import pdr_pf_improved as pdrmod  # noqa: E402
+from evaluate_accuracy import END_HOLD_SEC  # noqa: E402
 
 # 判定のしきい値。研究上の主張ではなく、その場で撮り直しを決めるための目安。
 GAP_SEC = 0.5              # これを超えるサンプル間隔を欠落とみなす(アプリ側と同じ)
@@ -63,6 +76,11 @@ STRIDE_MIN_M, STRIDE_MAX_M = 0.35, 0.95  # m/歩
 DISTANCE_WARN = 0.15
 DISTANCE_BAD = 0.40
 ROTATION_TOL_DEG = 45.0    # 想定正味回転からの許容ずれ
+# 正味回転は「最初のEDGE_STEPS歩の平均方位」と「最後のEDGE_STEPS歩の平均方位」の差で測る。
+# 記録全体の最初と最後の差にすると、記録開始直後の方位の飛び(0805の1438・1442で
+# 0.0秒の時点に126度・151度)や、STOPを押すときの持ち替えをそのまま拾う。1歩ごとの
+# 方位は歩行の揺れで数度ぶれるので、数歩の平均にする。
+EDGE_STEPS = 5
 STILL_SEC = 3.0            # START直後の静止を見る秒数
 STILL_ACC_STD_MAX = 0.6    # 静止とみなす加速度ノルムの標準偏差(m/s^2)
 
@@ -126,7 +144,7 @@ def check_walking(df, rep, expected_distance_m):
 
     if len(steps) == 0:
         rep.add(BAD, "ステップ検出", "1歩も検出されなかった")
-        return
+        return steps
     t = df["timestamp"].to_numpy(float)
     duration = float(t[-1] - t[0])
     cadence = len(steps) / duration if duration > 0 else 0.0
@@ -158,29 +176,45 @@ def check_walking(df, rep, expected_distance_m):
         rep.add(lv, "推定総移動距離",
                 f"{total_m:.1f} m / 想定 {expected_distance_m:.1f} m "
                 f"({err*100:+.0f}%){'  ' + note if note else ''}")
+    return steps
 
 
-def check_heading(df, rep, expected_net_deg):
-    """方位の健全性。1438のような記録をその場で弾く。"""
+def check_heading(df, rep, expected_net_deg, steps):
+    """方位の健全性。1438のような記録をその場で弾く。
+    最初の歩から最後の歩までの歩行区間だけを見る(EDGE_STEPSのコメント参照)。"""
     if "yaw_deg" not in df.columns or df["yaw_deg"].isna().all():
         rep.add(WARN, "方位(yaw_deg)", "列が無い。heading_source=android が使えない")
         return
-    yaw = np.rad2deg(np.unwrap(np.deg2rad(df["yaw_deg"].to_numpy(float))))
-    net = float(yaw[-1] - yaw[0])
+    if steps is None or len(steps) < 2:
+        rep.add(WARN, "方位(yaw_deg)", "歩が2歩未満で、歩行区間の方位を判定できない")
+        return
+    idx = np.arange(steps[0], steps[-1] + 1)
+    raw = df["yaw_deg"].to_numpy(float)[idx]
+    finite = np.isfinite(raw)
+    if finite.sum() < 2:
+        rep.add(WARN, "方位(yaw_deg)", "歩行区間に有効な値が無い")
+        return
+    idx, raw = idx[finite], raw[finite]
+    yaw = np.rad2deg(np.unwrap(np.deg2rad(raw)))   # 歩行区間の中だけで連続にする
+    step_yaw = np.interp(steps, idx, yaw)
+    n = max(1, min(EDGE_STEPS, len(steps) // 2))
+    net = float(np.mean(step_yaw[-n:]) - np.mean(step_yaw[:n]))
     span = float(yaw.max() - yaw.min())
-    jump = float(np.abs(np.diff(yaw)).max())
+    jump = float(np.abs(np.diff(yaw)).max()) if len(yaw) > 1 else 0.0
 
+    how = f"最初と最後の{n}歩の平均の差"
     if expected_net_deg is None:
-        rep.add(OK, "方位の正味回転", f"{net:+.0f} 度 (--expected-net-rotation-deg 未指定)")
+        rep.add(OK, "方位の正味回転",
+                f"{net:+.0f} 度 ({how}。--expected-net-rotation-deg 未指定)")
     else:
         lv = OK if abs(net - expected_net_deg) <= ROTATION_TOL_DEG else BAD
         rep.add(lv, "方位の正味回転",
                 f"{net:+.0f} 度 / 想定 {expected_net_deg:+.0f} 度 "
-                f"(許容 ±{ROTATION_TOL_DEG:.0f} 度)")
+                f"(許容 ±{ROTATION_TOL_DEG:.0f} 度、{how})")
     lv = OK if span <= 270 else WARN
-    rep.add(lv, "方位の振れ幅", f"{span:.0f} 度 (直角2回の経路なら180度程度が目安)")
+    rep.add(lv, "方位の振れ幅", f"{span:.0f} 度 (歩行区間。直角2回の経路なら180度程度が目安)")
     lv = OK if jump <= 30 else WARN
-    rep.add(lv, "方位の最大ジャンプ", f"{jump:.1f} 度/サンプル")
+    rep.add(lv, "方位の最大ジャンプ", f"{jump:.1f} 度/サンプル (歩行区間)")
 
 
 def check_still_start(df, rep):
@@ -198,8 +232,8 @@ def check_still_start(df, rep):
             f"(静止の目安 {STILL_ACC_STD_MAX} 以下)")
 
 
-def check_waypoints(csv_path, df, rep, landmarks_path):
-    """地点マークの整合。押し忘れ・押し過ぎ・時計基準のずれをその場で見つける。"""
+def check_waypoints(csv_path, df, rep, landmarks_path, steps=None):
+    """地点マークの整合。押し忘れ・押し過ぎ・時計基準のずれ・終点の押し遅れをその場で見つける。"""
     wp_path = csv_path.with_name(csv_path.stem + "_waypoints.csv")
     if not wp_path.exists():
         rep.add(WARN, "地点マーク", f"{wp_path.name} が無い(校正用データなら正常)")
@@ -238,12 +272,27 @@ def check_waypoints(csv_path, df, rep, landmarks_path):
         rep.add(OK if d.min() > 0.5 else WARN, "地点マークの間隔",
                 f"最小 {d.min():.1f} 秒 / 最大 {d.max():.1f} 秒")
 
+    # 終点の目印は止まってから押す。評価では最後の歩からEND_HOLD_SEC秒までの点を
+    # 「最後の推定位置に止まっている」として含めるので、それより遅いと終点が評価から外れる。
+    if steps is not None and len(steps) > 0 and len(wp) > 0:
+        last_step_t = float(df["timestamp"].iloc[int(steps[-1])])
+        last_mark_t = float(wp.sort_values("seq")["timestamp"].iloc[-1])
+        late = last_mark_t - last_step_t
+        if late > END_HOLD_SEC:
+            rep.add(WARN, "終点の地点マーク",
+                    f"最後の歩の {late:.1f} 秒後に押している。評価に入るのは{END_HOLD_SEC:g}秒"
+                    "以内なので、終点が評価から外れる。撮り直しを検討")
+        else:
+            rep.add(OK, "終点の地点マーク",
+                    f"最後の歩との差 {late:+.1f} 秒 (評価に入るのは {END_HOLD_SEC:g} 秒以内)")
+
 
 def check_one(csv_path, expected_distance_m, expected_net_deg, landmarks_path):
     rep = Report(f"{csv_path.name}")
     try:
         df = pdrmod.safe_read_csv(csv_path)
-        pdrmod.validate_log(df, csv_path.name)
+        # 本体と同じ前処理(欠損行・時刻の逆戻りの除去)をしたデータで判定する。
+        df = pdrmod.validate_log(df, csv_path.name)
     except Exception as e:
         rep.add(BAD, "読み込み", str(e))
         return rep.show()
@@ -254,10 +303,10 @@ def check_one(csv_path, expected_distance_m, expected_net_deg, landmarks_path):
         return rep.show()
 
     check_continuity(df, rep)
-    check_walking(df, rep, expected_distance_m)
-    check_heading(df, rep, expected_net_deg)
+    steps = check_walking(df, rep, expected_distance_m)
+    check_heading(df, rep, expected_net_deg, steps)
     check_still_start(df, rep)
-    check_waypoints(csv_path, df, rep, landmarks_path)
+    check_waypoints(csv_path, df, rep, landmarks_path, steps)
     return rep.show()
 
 
@@ -284,24 +333,37 @@ def _self_test():
     assert all(l == OK for l, _, _ in r.lines), r.lines
     print("  OK: 連続した記録を正常と判定")
 
-    # 方位: 正味回転が想定と大きく違う場合
+    # 方位。歩は 1〜19秒の間に0.5秒ごと(前後は静止)とする。
+    steps = np.arange(50, 950, 25)
+
+    # 正味回転が想定と大きく違う場合(1438のように歩行中に回り続ける)
     r = Report("yaw")
     d = pd.DataFrame({"timestamp": t, "yaw_deg": np.linspace(0, 146, len(t))})
-    check_heading(d, r, -90.0)
+    check_heading(d, r, 0.0, steps)
     assert any(l == BAD and "正味回転" in i for l, i, _ in r.lines), r.lines
     print("  OK: 想定と食い違う正味回転を異常として検出")
 
+    # 今の経路の形(東→北→東 = 0 → -90 → 0 度)は、想定0度で正常
     r = Report("yaw_ok")
-    check_heading(pd.DataFrame({"timestamp": t, "yaw_deg": np.linspace(0, -88, len(t))}),
-                  r, -90.0)
+    route = np.interp(t, [0, 6, 7, 12, 13, sec], [0, 0, -90, -90, 0, 0])  # 曲がりは1秒かけて回る
+    check_heading(pd.DataFrame({"timestamp": t, "yaw_deg": route}), r, 0.0, steps)
     assert not any(l == BAD for l, _, _ in r.lines), r.lines
-    print("  OK: 想定どおりの回転を正常と判定")
+    print("  OK: 東→北→東の経路を正味0度として正常と判定")
+
+    # 記録開始直後の方位の飛び(0805の1442では0.0秒に151度)は、歩き始める前なので拾わない
+    r = Report("yaw_glitch")
+    glitch = route.copy()
+    glitch[:3] = 151.0
+    glitch[-2:] = -150.0                     # STOPを押すときの持ち替えも同様
+    check_heading(pd.DataFrame({"timestamp": t, "yaw_deg": glitch}), r, 0.0, steps)
+    assert all(l == OK for l, _, _ in r.lines), r.lines
+    print("  OK: 歩き始める前と止まった後の方位の飛びは判定に使わない")
 
     # 方位が ±180 をまたぐ場合に unwrap が効いているか
     r = Report("wrap")
     yaw = np.linspace(170, 190, len(t))
     yaw = ((yaw + 180) % 360) - 180          # 170→-170 へ折り返す
-    check_heading(pd.DataFrame({"timestamp": t, "yaw_deg": yaw}), r, 20.0)
+    check_heading(pd.DataFrame({"timestamp": t, "yaw_deg": yaw}), r, 20.0, steps)
     assert not any(l == BAD for l, _, _ in r.lines), r.lines
     print("  OK: ±180度をまたぐ方位を折り返しとして正しく扱う")
 
@@ -348,7 +410,17 @@ def _self_test():
             td / "pdr_log_test_waypoints.csv", index=False)
         r = Report("wp_ok"); check_waypoints(main, dfm, r, lm)
         assert not any(l == BAD for l, _, _ in r.lines), r.lines
-    print("  OK: 地点マークの時刻ずれ・押し忘れ・正常を区別")
+
+        # 終点の押し遅れ。最後の歩は t=18.5秒(steps[-1]=925)。
+        for name, last_press, expect_warn in (("wp_end_ok", 18.5 + 1.5, False),
+                                              ("wp_end_late", 18.5 + END_HOLD_SEC + 0.5, True)):
+            pd.DataFrame({"timestamp": [0.5, 5.0, 10.0, 15.0, last_press],
+                          "seq": range(1, 6)}).to_csv(
+                td / "pdr_log_test_waypoints.csv", index=False)
+            r = Report(name); check_waypoints(main, dfm, r, lm, steps)
+            warned = any(l == WARN and "終点" in i for l, i, _ in r.lines)
+            assert warned == expect_warn, (name, r.lines)
+    print("  OK: 地点マークの時刻ずれ・押し忘れ・終点の押し遅れ・正常を区別")
     print("--- self-test 全て通過 ---")
 
 
@@ -364,7 +436,9 @@ def main():
     p.add_argument("--expected-distance-m", type=float, default=None,
                    help="経路の想定歩行距離[m]。east_std=89.3 / east_short=71.6 など。")
     p.add_argument("--expected-net-rotation-deg", type=float, default=None,
-                   help="経路の想定正味回転[度]。西→東の標準経路は約 -90 または +90。")
+                   help="経路の想定正味回転[度]。今ある経路(east_std・east_short・west_reverse・"
+                        "rehearsal・east_dense)はどれも東→北→東かその逆向きなので 0。"
+                        "校正用の直線歩行も 0。")
     p.add_argument("--landmarks", type=Path, default=None,
                    help="make_route_landmarks.pyが出したlandmarks CSV(点数の照合用)。")
     p.add_argument("--self-test", action="store_true")

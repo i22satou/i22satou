@@ -2,6 +2,8 @@
 # calibrate_step_length.py
 #
 # 【変更履歴】
+# - 2026-09-24: 実行条件に記録する「未コミットの変更あり」が常にtrueになっていたのを修正
+#               (git_revision()。実行自身の出力フォルダを変更として数えていた)。
 # - 2026-09-18: [本研究独自] 新規作成。距離が分かっている直線を「ゆっくり・普通・速歩」で
 #               歩いた校正用データから、全CSV共通の歩幅校正ゲイン
 #               (step_length_calibration_gain)を求め直す。
@@ -188,8 +190,11 @@ def git_revision():
     try:
         commit = subprocess.run(["git", "rev-parse", "--short", "HEAD"], cwd=PROGRAM_DIR,
                                 capture_output=True, text=True, check=True).stdout.strip()
-        dirty = subprocess.run(["git", "status", "--porcelain"], cwd=PROGRAM_DIR,
-                               capture_output=True, text=True, check=True).stdout.strip()
+        # 未追跡のファイルは数えない。数えると、この実行自身が先に書き出した出力フォルダ
+        # (まだgitに入っていない)まで変更とみなし、記録が常にtrueになっていた(2026-09-24)。
+        dirty = subprocess.run(["git", "status", "--porcelain", "--untracked-files=no"],
+                               cwd=PROGRAM_DIR, capture_output=True, text=True,
+                               check=True).stdout.strip()
         return commit, bool(dirty)
     except (OSError, subprocess.CalledProcessError):
         return None, None

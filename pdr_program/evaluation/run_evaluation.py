@@ -2,6 +2,9 @@
 # run_evaluation.py
 #
 # 【変更履歴】
+# - 2026-09-24: 終点で止まってから押した正解点を評価に含める変更(evaluate_accuracy.py の
+#               END_HOLD_SEC)に合わせ、その件数を表・注意書き・conditions.json に残すようにした。
+#               自己テストに「止まってから押す」場面を追加。
 # - 2026-09-18: [本研究独自] 新規作成。計測データと計測一覧表を置いて1回実行すれば、
 #               卒論第7章の比較(方式別・ファイル別のRMSE表、箱ひげ図、軌跡図、実行条件の
 #               記録)まで作る評価ハーネス。
@@ -90,7 +93,7 @@ import pdr_pf_improved as pdrmod  # noqa: E402
 from build_ground_truth import build_ground_truth, load_landmarks, load_waypoints  # noqa: E402
 from calibrate_step_length import git_revision  # noqa: E402
 from compare_route_source import parse_log  # noqa: E402
-from evaluate_accuracy import evaluate  # noqa: E402
+from evaluate_accuracy import END_HOLD_SEC, evaluate  # noqa: E402
 from measurement_list import load_measurement_list, resolve_csv_path  # noqa: E402
 
 RESULTS_DIR = PROGRAM_DIR / "results"
@@ -428,7 +431,9 @@ def collect_results(items, methods, seeds, diag, ctx):
             return
         try:
             # 地点マーク1番は歩き始める前に押すので、推定軌跡の時刻範囲の外として毎回除外
-            # される(想定どおり)。1件ごとの警告は出さず、除外数は表に残して最後にまとめる。
+            # される(想定どおり)。終点の目印は止まってから押すので、最後の歩から
+            # END_HOLD_SEC秒以内なら最後の推定位置と比べて含める(evaluate_accuracy.py)。
+            # 1件ごとの警告は出さず、件数は表に残して最後にまとめる。
             logging.disable(logging.WARNING)
             summary = evaluate(trajectory, item["ground_truth"], scale_px_per_m=ctx["scale"])
         except ValueError as error:
@@ -438,7 +443,8 @@ def collect_results(items, methods, seeds, diag, ctx):
         finally:
             logging.disable(logging.NOTSET)
         row.update({k: summary[k] for k in (
-            "n_points", "excluded_points", "rmse_m", "mean_error_m", "max_error_m",
+            "n_points", "excluded_points", "held_end_points", "rmse_m", "mean_error_m",
+            "max_error_m",
             "rmse_px", "mean_error_px", "max_error_px")})
 
     for item in items:
@@ -483,14 +489,22 @@ def collect_results(items, methods, seeds, diag, ctx):
 
     df = pd.DataFrame(rows)
     df["method_key"] = pd.Categorical(df["method_key"], categories=METHOD_KEYS, ordered=True)
-    for column in [c for c, _ in METRICS] + ["trajectory", "excluded_points"]:
+    for column in [c for c, _ in METRICS] + ["trajectory", "excluded_points", "held_end_points"]:
         if column not in df.columns:
             df[column] = np.nan
     if df["excluded_points"].fillna(0).sum() > 0:
         per_file = df.groupby("file")["excluded_points"].max().dropna()
         notes.append("推定軌跡の時刻範囲外で評価から外した正解点(ファイルごとの最大): "
                      + ", ".join(f"{f} {int(n)}点" for f, n in per_file.items())
-                     + "。地点マーク1番は歩き始める前に押すので、1点は外れるのが正常")
+                     + "。地点マーク1番は歩き始める前に押すので、1点は外れるのが正常。"
+                     f"2点以上なら、終点のボタンを最後の歩から{END_HOLD_SEC:g}秒より後に"
+                     "押したなどの可能性がある")
+    if df["held_end_points"].fillna(0).sum() > 0:
+        per_file = df.groupby("file")["held_end_points"].max().dropna()
+        notes.append(f"最後の歩の後({END_HOLD_SEC:g}秒以内)に押したため、最後の推定位置で"
+                     "止まっているとみなして評価した正解点(ファイルごとの最大): "
+                     + ", ".join(f"{f} {int(n)}点" for f, n in per_file.items())
+                     + "。終点の目印なら正常")
     return df.sort_values(["method_key", "file", "seed"]).reset_index(drop=True), notes
 
 
@@ -754,6 +768,10 @@ def run_evaluation(list_path, data_dir, map_config, out_root=RESULTS_DIR, tag=No
         "heading_calibration_mode": calibration_mode,
         "step_length_calibration_gain": gain if gain else config_gain,
         "scale_px_per_m": scale,
+        "end_hold_sec": END_HOLD_SEC,
+        "evaluation_rule": ("地点マークを押した時刻で推定軌跡を線形補間して正解位置と比べる。"
+                            "推定軌跡の時刻範囲外の点は外す。ただし最後の歩から"
+                            f"{END_HOLD_SEC:g}秒以内の点は最後の推定位置と比べて含める"),
         "table_definitions": {
             "table_by_method": "方式ごとに、正解位置のある全ファイル×全シードの値の平均±標本標準偏差",
             "table_by_method_file": "方式・ファイルごとに、シード間の平均±標本標準偏差(方式Aは1値)",
@@ -857,16 +875,20 @@ def _self_test(keep_dir=None):
             _write_synthetic_walk(data / name, 25, 37.0, rng)
             t_steps, cum = _synthetic_truth(data / name)
             assert len(t_steps) == 25, len(t_steps)
+            xs = [x0] + [x0 + direction * cum[j] for j in marks]
+            times = [t_steps[0] - 0.5] + [t_steps[j] for j in marks]
             if direction < 0:
                 cum_west = cum  # 西向きの記録の、PDRのみの終点の確認に使う
-            xs = [x0] + [x0 + direction * cum[j] for j in marks]
+                # 終点で立ち止まってから押す場面(最後の歩の1.5秒後)。最後の推定位置に
+                # 止まっているとみなして評価に入ることを確かめる(2026-09-24)。
+                xs.append(x0 + direction * cum[-1])
+                times.append(t_steps[-1] + 1.5)
             if route not in written_routes:
                 pd.DataFrame({"seq": range(1, len(xs) + 1), "label": [f"p{i}" for i in range(len(xs))],
                               "point_type": "wall", "x_px": xs, "y_px": 230.0}).to_csv(
                     lm_dir / f"kanri_4f_landmarks_{route}.csv", index=False)
                 written_routes.add(route)
             if with_waypoints:
-                times = [t_steps[0] - 0.5] + [t_steps[j] for j in marks]
                 pd.DataFrame({"timestamp": times, "seq": range(1, len(times) + 1)}).to_csv(
                     data / f"{Path(name).stem}_waypoints.csv", index=False)
         # 点数が同じで間隔の並びが違う経路(書き間違いの検出の確認用)
@@ -912,6 +934,15 @@ def _self_test(keep_dir=None):
         assert len(pdr) == 2 and (pdr["rmse_m"] < 0.01).all(), pdr[["file", "rmse_m"]]
         print(f"  OK: PDRのみのRMSEが東向き・西向きとも約0m(最大{pdr['rmse_m'].max():.4f}m)"
               "= 時刻の突き合わせと初期方位(0度/180度)が正しい")
+
+        scored = df[df["has_ground_truth"]]
+        west = scored[scored["file"] == "pdr_log_9001_0003.csv"]
+        east = scored[scored["file"] == "pdr_log_9001_0001.csv"]
+        assert (west["held_end_points"] == 1).all() and (west["excluded_points"] == 1).all(), west
+        assert (west["n_points"] == len(marks) + 1).all(), west["n_points"].tolist()
+        assert (east["held_end_points"] == 0).all() and (east["n_points"] == len(marks)).all(), east
+        print("  OK: 終点で止まってから押した点(最後の歩の1.5秒後)を、最後の推定位置と比べて"
+              "評価に含める。外れるのは歩き始める前に押した1番だけ")
 
         table = result["tables"]["table_by_method"]
         assert list(table["method_key"]) == METHOD_KEYS, table["method_key"].tolist()
