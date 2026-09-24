@@ -29,7 +29,7 @@
 - `route_source=manual`の`prefer/enforce`は正解に近い手動経路を使う比較条件であり、最終提案方式ではない。
 - **`--route-source auto`単体では地図制約がかからない**(`kanri_4f.json`の既定`route_constraint_mode`は`none`)。単独実行で検証するときは必ず`--route-constraint-mode enforce`を付けるか、`compare_route_source.py`の標準条件を使う(2026-08-30に誤った結論を出した実例あり)。
 - `is_in_wall()`が`route_mask`を見ないのは意図的な設計。バグに見えても直さない。
-- 2026-09-02にPDR上流(ステップ過検出・歩幅過小)を是正し、総距離校正を削除した。**それ以前の比較実験の数値は現在と直接比較できない**。歩幅校正ゲイン2.10は評価用CSVで求めた暫定値(memo/step_length_calibration.md)。
+- 2026-09-02にPDR上流(ステップ過検出・歩幅過小)を是正し、総距離校正を削除した。**それ以前の比較実験の数値は現在と直接比較できない**。歩幅校正ゲイン2.10と曲がり終了のヨーレートしきい値10度/秒は暫定値で、計測日のcalibの記録から決め直す(memo/step_length_calibration.md、memo/comparison_methods.md)。
 - 真のRMSEには時刻対応した正解位置が必要。終点x誤差は代替指標でありRMSEと呼ばない。**合成データのRMSE値を研究結果として報告しない**(memo/ground_truth.md)。
 - 主比較対象は`kanri_4f.json`の`0805_1438/1441/1442`の3CSV。`l_map.json`は技術確認用。CSVごとに方位の質が大きく違う(memo/heading_calibration.md)。`heading_source=android`には`yaw_deg`列が必要。
 - 不確実性適応粒子数は`kanri_4f.json`で既定ON(全滅回数は改善、位置精度の一様な改善は未確認。memo/uncertainty_particles.md)。既定OFFの実験機能(`exclude_wide_rooms`・`--auto-route-centerline`・`--multi-hypothesis-routing`・分岐選別尤度)の効果と注意点はmemo参照。分岐選別尤度と`--multi-hypothesis-branch-heading-sigma-deg`の併用は二重計上になる。
