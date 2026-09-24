@@ -129,6 +129,9 @@ REFERENCES_PLACEHOLDER = (
 CHAPTER_RE = re.compile(r"^第(\d+)章(?:[\s　]+(.*))?$")
 SECTION_RE = re.compile(r"^(\d+)\.(\d+)[\s　]+(.+)$")
 SEP_RE = re.compile(r"^-{10,}$")
+# 「参考文献」だけの行から次の区切り線(またはファイル末尾)までを参考文献欄として読む。
+REFS_RE = re.compile(r"^参考文献$")
+REFS_KEY = "refs"
 MATH_FENCE = "$$"
 
 # CHAPTERSに実在する節番号だけを見出しとして扱う。本文には数式(TeX)が含まれ、
@@ -177,6 +180,11 @@ def parse_memo(text: str):
             flush()
             current_id = None
             current_chapter = None
+            continue
+        if REFS_RE.match(s):
+            flush()
+            current_chapter = REFS_KEY
+            current_id = None
             continue
         m_ch = CHAPTER_RE.match(s)
         if m_ch:
@@ -244,7 +252,8 @@ def build_markdown(sections, chapter_only) -> str:
 
     lines.append("# 参考文献")
     lines.append("")
-    lines.append(REFERENCES_PLACEHOLDER)
+    # CLAUDE_MEMO.txtに参考文献欄があればそれを、無ければ執筆指示のプレースホルダを出す。
+    lines.append(chapter_only.get(REFS_KEY, REFERENCES_PLACEHOLDER))
     lines.append("")
 
     return "\n".join(lines)

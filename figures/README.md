@@ -78,3 +78,17 @@
 地図に重ねている。7番は「終点で立ち止まってから、最後の歩の1.5秒後にボタンを押した」設定の目印で、
 2026-09-24の修正(最後の歩から5秒以内に押した点は、最後の推定位置に止まっているとみなして評価に含める)により
 正解位置として評価に入るようになった。修正前は推定軌跡の時刻範囲外として外れていた。
+
+## 卒論第5章の図(2026-09-24)
+
+### `fig5_1_route_mask_graph.png` / `fig5_2_route_mask_graph_exclude_wide_rooms.png`
+
+卒論の図5.1・図5.2。二値地図から自動抽出した経路帯(黄色)と、その骨格から作った通路グラフ(整理後)。
+図5.1は提案方式の既定の設定(交差点14・端点3・通路24)、図5.2は変種「広い部屋の除外」を有効にしたもの
+(交差点8・端点7・通路17)。`pdr_program/` で次のように作り、ここへコピーした。
+
+    python evaluation/verify_route_graph.py --map-config map_configs/kanri_4f.json --simplify --no-exclude-wide-rooms --save <出力先>
+    python evaluation/verify_route_graph.py --map-config map_configs/kanri_4f.json --simplify --exclude-wide-rooms --save <出力先>
+
+注意: `pdr_program/results/kanri_4f_route_graph_check_simplified.png` は「広い部屋の除外」を有効にした図で、
+既定の設定の図ではない。

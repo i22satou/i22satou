@@ -53,6 +53,9 @@ python evaluation/compare_route_source.py --seeds 1 7 42 100 777 2024
 - 調査経緯・却下した仮説: `memo/`(索引は[CLAUDE_MEMO.md](CLAUDE_MEMO.md)。関係するトピックの1ファイルだけ読む)。非自明な決定をしたら該当memoの先頭に追記する。
 - 実験条件・数値: `pdr_program/results/`。
 - 卒研全体の進捗・論文構成: `../研究計画系/進捗反映版メモ.txt`(リポジトリ外。i22satou直下に同名ファイルを誤って作らない)。研究計画・章構成の作業のときだけ読む。
+- 先行研究(関連研究・手法の出典・比較の考察)に触れるときは、先に`memo/references.md`を読む。
+  ノートに無い内容は原文(Google Driveの`卒研_参考文献/`。変換済みの読める版あり)で確かめてから書き、
+  ページ番号を添える。論文の本文やPDFはこのリポジトリに入れない(公開のため)。
 - **次の大きなファイルは、卒論執筆を依頼されたときだけ開く**: `卒論/卒業論文_雛形.md`、`CLAUDE_MEMO.txt`(卒論向け文章の下書き)。
 - 設定は`pdr_program/map_configs/*.json`(必須値の欠落はエラー)。JSONの`data_dir`はMacのパス。Windowsでは環境変数`PDR_DATA_DIR`(`G:\マイドライブ\PDR`)で上書きし、Pythonは`~/anaconda3/python.exe`を使う。生データはリポジトリ外を含むので、パスやデータを勝手に変更しない。
 
