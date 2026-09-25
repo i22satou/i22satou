@@ -2,8 +2,7 @@
 
 複数セッションにまたがってClaude Codeが行った調査・意思決定とその理由(「何を変えたか」
 ではなく「なぜそう判断したか」「何を確認済みで何が未確認か」)は、**このファイル本体
-ではなく`memo/`配下のトピック別ファイルに記録する**(2026-08-16、旧CLAUDE_MEMO.mdの
-全文をトピックごとに分割した。過去の全文はgit履歴に残っている)。
+ではなく`memo/`配下のトピック別ファイルに記録する**。
 
 ## 使い方(トークンを節約するために)
 
@@ -16,7 +15,7 @@ route_source=autoの検証中に見つかった1441/1442の謎)は、両方の�
 
 | ファイル | 扱っている内容 |
 |---|---|
-| [memo/route_source_auto.md](memo/route_source_auto.md) | route_source=auto(二値地図からの経路帯マスク自動抽出)の実装・none/manual/auto比較実験・L字マップでの第二検証環境の試み(不採用)・中心線抽出の実装と、通路/部屋境界を区別するexclude_wide_roomsの実装(6シード検証で全滅回数-16.8%・終点誤差-18.5%、既定OFF)。**決着済み・圧縮済み** |
+| [memo/route_source_auto.md](memo/route_source_auto.md) | route_source=auto(二値地図からの経路帯マスク自動抽出)の実装・none/manual/auto比較実験・L字マップでの第二検証環境の試み(不採用)・中心線抽出の実装と、通路/部屋境界を区別するexclude_wide_roomsの実装(6シード検証の結果あり、既定OFF)。**決着済み・圧縮済み** |
 | [memo/uncertainty_particles.md](memo/uncertainty_particles.md) | 不確実性適応粒子数(§6.5)の実装・6シード検証・4パラメータの感度分析(初期値は妥当と確認) |
 | [memo/heading_calibration.md](memo/heading_calibration.md) | 方位の質のCSVごとの差・初期方位校正方式(samples/walking)・1438の逆走仮説の検定(棄却) |
 | [memo/step_length_calibration.md](memo/step_length_calibration.md) | ステップ検出の過検出(第2高調波)・歩幅の過小推定と校正ゲイン。**sensor_mysteryの1441/1442問題の答え** |
@@ -25,7 +24,7 @@ route_source=autoの検証中に見つかった1441/1442の謎)は、両方の�
 | [memo/ground_truth.md](memo/ground_truth.md) | 正解位置データ(RMSE用)の目印設計と現地採寸。**pick_landmarks.pyを使わない理由**・平面図が二値地図と同一座標系で使えること・平面図にドアが無いことの確認・マスター表+経路定義方式・縮尺検証の設計 |
 | [memo/comparison_methods.md](memo/comparison_methods.md) | 卒論第7章の比較方式(PDRのみ・固定粒子数PF・移動様態適応PF・提案方式)の定義と条件決め。固定粒子数PFの粒子数・ノイズの材料、**既存3本では歩の8〜9割以上が「曲がり」判定(原因は曲がり終了のヨーレートしきい値。calibから決め直す)**、全滅時の復帰の変更とその効果が小さかった理由、連続壁尤度の実際の重み |
 | [memo/references.md](memo/references.md) | **先行研究ノート**(秋山2013・古屋2023・SmartPDR・上田2005)。各論文の要点とページ番号、本研究が取り入れた点と違い、引用するときの注意、読めていない部分。原文はGoogle Driveの`卒研_参考文献/` |
-| [memo/file_cleanup.md](memo/file_cleanup.md) | 不要ファイルの「削除候補」フォルダへの移動(2026-08-15) |
+| [memo/file_cleanup.md](memo/file_cleanup.md) | 不要ファイルの「削除候補」フォルダへの移動(2026-08-15〜、最新は2026-09-24のfigures/整理) |
 | [memo/pipeline_fixes.md](memo/pipeline_fixes.md) | pdr_pf_improved.py本体の初期バグ修正(route_points座標修正、prefer/enforceの挙動修正、未使用コード削除、pdr_pf_clickstart.pyとの差分解消) |
 | [memo/android_app.md](memo/android_app.md) | PDR計測アプリ(Android)のCSVフォーマット拡張・コードレビュー |
 
