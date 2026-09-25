@@ -6,6 +6,25 @@
 
 ---
 
+### 2026-09-25: 旧版と初期のL字検証を削除候補へ移動(ユーザー依頼)
+
+- `削除候補/`へ`git mv`: `pdr_pf_clickstart.py`(旧版の本体)、`test7.py`・`L.png`(初期のL字検証)。
+  下の「残した理由が非自明なもの」で残していた理由(除外4CSVの別図に使用中)はユーザーが不要と判断した。
+- 今のL字の技術確認用(`map_configs/l_map.json`・`L_map.png`・`tools/Lmap.py`)は本体から使うので残した。
+  `l_map.json`の`_comment`にある「test7.pyの較正値を流用」は値の由来の記録なので直していない。
+- 参照を更新: `pdr_program/README.md`(ここに含めていないもの)、`pdr_program/CLAUDE.md`(編集の規則)。
+
+### 2026-09-25: results/の参照されていないPNG3枚を削除候補へ移動(ユーザー依頼)
+
+- `削除候補/results/`へ`git mv`: `20260903_170139`・`170204`・`171321`の
+  `route-none-manual+unc_head-gyro-samples_seed-42.png`。9/3のアプリ変更後の動作確認
+  (waypoints CSVを拾う問題の修正確認)で出た実行ごとの副産物で、どのmd・コードからも
+  参照されていない。170139と170204は中身が同一(MD5一致)。
+- 残した判断: CSV・JSONは数値の記録なので全て残した(参照が0件のものも)。
+  評価フォルダ内の`trajectory_*.png`は各フォルダの結果の一部なので残した。
+  `ground_truth/`の`east_short`・`west_reverse`は、`run_evaluation.py`が経路名から読むので残した。
+  `pdr_pf_clickstart.py`・`test7.py`・`L.png`・`figures/check_flowcharts.py`は、下の項で残した理由があるため動かしていない。
+
 ### 2026-09-25: 卒論原稿の改名(`CLAUDE_MEMO.txt`→`卒論/卒論原稿.txt`、`git mv`)
 
 - 理由: memo索引の`CLAUDE_MEMO.md`と名前が紛らわしく、取り違えやすかったため。
