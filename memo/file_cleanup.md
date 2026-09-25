@@ -6,6 +6,27 @@
 
 ---
 
+### 2026-09-25: 卒論原稿の改名(`CLAUDE_MEMO.txt`→`卒論/卒論原稿.txt`、`git mv`)
+
+- 理由: memo索引の`CLAUDE_MEMO.md`と名前が紛らわしく、取り違えやすかったため。
+- 参照を更新: `CLAUDE.md`、`pdr_program/README.md`、`卒論/build_thesis_docx.py`(読み込み先を
+  `HERE / "卒論原稿.txt"`に変更し、雛形を再生成)。過去の記録(このmemoの下の方、
+  `results/20260816_110418_uncertainty_sensitivity.csv`の「CLAUDE_MEMO.txt §8.2」)は当時の名前のまま残した。
+
+### 2026-09-24: figures/の整理(ユーザー依頼「今の方式と違うもの、卒論に使わないもの」)
+
+- `削除候補/figures/`へ`git mv`: `pdr_flow_diagram.py/.png/.pdf`(matplotlib版の処理フロー図。
+  卒論未使用、内容も古い=総距離校正あり・複数経路仮説を未実装扱い・方式Dを比較に含む)と、
+  9/24の点検用の図2枚(quick_check方位判定、架空データの自己テスト。卒論にも進捗報告にも未使用)。
+  理由と移す前の説明は`削除候補/figures/README.md`。
+- 残した判断: `fig3_1/3_2/4_3/8_1/8_2`は`thesis_figures.py`を今の本体で作り直すと画素単位で
+  一致した(古くない)。`20260924_移動様態判定…png`は進捗報告・memo・results/20260924_summary.md
+  から参照され、卒論4.7節の問題の説明にも使えるので残した。`check_flowcharts.py`はMac専用だが
+  今のdrawioにも有効な検査なので残した。
+- 作ったもの: `figures/render_flowcharts.py`(drawio→PNG。draw.ioが無いWindowsでもEdge/Chrome+
+  draw.io公式ビューアで描ける)。`thesis_figures.py`のCSVフォルダを`PDR_DATA_DIR`に従わせた
+  (従来はMacのパス固定でWindowsで作り直せなかった)。READMEに卒論の図番号とファイルの対応表を足した。
+
 ### 2026-09-18: pdr_program/を本体・evaluation/・tools/に分けた(ユーザー依頼)
 
 - 本体(`pdr_pf_improved.py`・`pdr_route_graph.py`)は**意図的に動かしていない**。本体は

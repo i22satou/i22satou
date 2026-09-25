@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-CLAUDE_MEMO.txt から卒業論文の雛形(Markdown/Word)を自動生成するスクリプト。
+卒論原稿.txt から卒業論文の雛形(Markdown/Word)を自動生成するスクリプト。
 
 構成(章・節番号・タイトル・執筆指示プレースホルダ)は
 ../研究計画系/進捗反映版メモ.txt の「13. 卒業論文の章題構成例」に基づき、
 このファイルに固定データとして埋め込んである(その資料自体は今後もほぼ
 変わらない想定のため)。
 
-一方、各節の本文は ../CLAUDE_MEMO.txt を都度パースして差し込む。
-CLAUDE_MEMO.txt が更新されるたびにこのスクリプトを実行すれば、
+一方、各節の本文は 卒論原稿.txt を都度パースして差し込む。
+卒論原稿.txt が更新されるたびにこのスクリプトを実行すれば、
 書けている節は自動的に本文へ、まだの節は執筆指示プレースホルダのまま
 反映される。
 
@@ -27,7 +27,7 @@ import sys
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-MEMO_PATH = HERE.parent / "CLAUDE_MEMO.txt"
+MEMO_PATH = HERE / "卒論原稿.txt"
 OUT_MD = HERE / "卒業論文_雛形.md"
 OUT_DOCX = HERE / "卒業論文_雛形.docx"
 
@@ -123,7 +123,7 @@ REFERENCES_PLACEHOLDER = (
 )
 
 # ----------------------------------------------------------------------
-# CLAUDE_MEMO.txt のパース
+# 卒論原稿.txt のパース
 # ----------------------------------------------------------------------
 
 CHAPTER_RE = re.compile(r"^第(\d+)章(?:[\s　]+(.*))?$")
@@ -141,7 +141,7 @@ VALID_SECTION_IDS = {sec_id for _, _, secs in CHAPTERS for sec_id, _, _ in secs}
 
 
 def parse_memo(text: str):
-    """CLAUDE_MEMO.txt を { 'X.Y': body } と { chapter_num: whole_body } に分解する。"""
+    """卒論原稿.txt を { 'X.Y': body } と { chapter_num: whole_body } に分解する。"""
     sections = {}
     chapter_only = {}
     current_id = None
@@ -212,8 +212,8 @@ def build_markdown(sections, chapter_only) -> str:
     lines.append("")
     lines.append("> **この雛形について（自動生成ファイル・直接編集しないこと）**")
     lines.append("> 章立ては `進捗反映版メモ.txt` 13節「卒業論文の章題構成例」、")
-    lines.append("> 本文は `CLAUDE_MEMO.txt` から `build_thesis_docx.py` が自動生成した。")
-    lines.append("> 内容を追記・修正する場合は `CLAUDE_MEMO.txt` を編集すること")
+    lines.append("> 本文は `卒論原稿.txt` から `build_thesis_docx.py` が自動生成した。")
+    lines.append("> 内容を追記・修正する場合は `卒論原稿.txt` を編集すること")
     lines.append("> （編集すると自動でこのファイルと.docxが再生成される）。")
     lines.append("> 未執筆の節は「・ここには〜を書く」という執筆指示のプレースホルダのまま。")
     lines.append("")
@@ -224,13 +224,13 @@ def build_markdown(sections, chapter_only) -> str:
         lines.append(f"# 第{chap_id}章　{chap_title}")
         lines.append("")
 
-        # その章のどのsection番号もCLAUDE_MEMO.txtに登場せず、
+        # その章のどのsection番号も卒論原稿.txtに登場せず、
         # かつ章見出し直下にまとまった本文がある場合(現状は第9章のみ)は
         # 節に分割せず、章全体をそのまま差し込む。
         any_section_hit = any(sid in sections for sid, _, _ in secs)
         if not any_section_hit and chap_id in chapter_only:
             lines.append(
-                f"## {secs[0][0]}〜{secs[-1][0]} {chap_title}(CLAUDE_MEMO.txtより自動挿入・未分割)"
+                f"## {secs[0][0]}〜{secs[-1][0]} {chap_title}(卒論原稿.txtより自動挿入・未分割)"
             )
             lines.append("")
             lines.append(chapter_only[chap_id])
@@ -252,7 +252,7 @@ def build_markdown(sections, chapter_only) -> str:
 
     lines.append("# 参考文献")
     lines.append("")
-    # CLAUDE_MEMO.txtに参考文献欄があればそれを、無ければ執筆指示のプレースホルダを出す。
+    # 卒論原稿.txtに参考文献欄があればそれを、無ければ執筆指示のプレースホルダを出す。
     lines.append(chapter_only.get(REFS_KEY, REFERENCES_PLACEHOLDER))
     lines.append("")
 
