@@ -9,6 +9,7 @@
 出力先は figures/ 直下。実行:
     python3 thesis_figures.py
 """
+import os
 import sys
 from pathlib import Path
 
@@ -27,9 +28,11 @@ sys.path.insert(0, str(PROG_DIR))
 
 import pdr_pf_improved as P  # noqa: E402
 
-DATA_DIR = Path(
-    "/Users/soma/Library/CloudStorage/GoogleDrive-satosoma0608@gmail.com/マイドライブ/PDR"
-)
+# CSVフォルダは本体と同じく環境変数PDR_DATA_DIRで上書きできる(Windowsでは G:\マイドライブ\PDR)。
+DATA_DIR = Path(os.environ.get(
+    "PDR_DATA_DIR",
+    "/Users/soma/Library/CloudStorage/GoogleDrive-satosoma0608@gmail.com/マイドライブ/PDR",
+))
 FILES = ["pdr_log_0805_1438.csv", "pdr_log_0805_1441.csv", "pdr_log_0805_1442.csv"]
 MAP_PNG = PROG_DIR / "kanri_4f_binary_final3.png"
 SCALE = 11.4  # px/m (map_configs/kanri_4f.json の scale_px_per_m)

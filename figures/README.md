@@ -1,14 +1,33 @@
 # figures/
 
-卒論用の図と、コードの点検・説明に使った図を置くフォルダ。卒論用の図(`fig*.png`、`pdr_*`)は、
-同じフォルダのスクリプト(`thesis_figures.py`・`pdr_flow_diagram.py` など)や drawio で作ったもの。
-作り方は各スクリプトの冒頭を参照。
+卒論用の図と、コードの点検・説明に使った図を置くフォルダ。作り方は各スクリプトの冒頭も参照。
+使わなくなった図・スクリプトは `../削除候補/figures/` へ移した(理由は同フォルダの README.md)。
+
+## 卒論の図の一覧(`卒論/卒業論文_雛形.md` が貼っているもの)
+
+| 図 | ファイル | 作り方 |
+|---|---|---|
+| 3.1 | `fig3_1_map_route.png` | `thesis_figures.py` |
+| 3.2 | `fig3_2_sensor_example.png` | `thesis_figures.py` |
+| 4.1 | `pdr_system_diagram.png` | `make_flowcharts.py` → `render_flowcharts.py` |
+| 4.2 | `pdr_flow_main.png` | `make_flowcharts.py` → `render_flowcharts.py` |
+| 4.3 | `fig4_3_step_detection.png` | `thesis_figures.py` |
+| 4.4 | `pdr_flow_pf_detail.png` | `make_flowcharts.py` → `render_flowcharts.py` |
+| 5.1 | `fig5_1_route_mask_graph.png` | `pdr_program/evaluation/verify_route_graph.py`(下の第5章の節) |
+| 5.2 | `fig5_2_route_mask_graph_exclude_wide_rooms.png` | 同上 |
+| 8.1 | `fig8_1_acc_spectrum.png` | `thesis_figures.py` |
+| 8.2 | `fig8_2_heading_profile.png` | `thesis_figures.py` |
+
+`thesis_figures.py` は本体(`pdr_pf_improved.py`)の関数をそのまま使う。CSVフォルダは本体と同じく環境変数
+`PDR_DATA_DIR` で指定する(Windowsでは `G:\マイドライブ\PDR`)。2026-09-24 に今の本体で作り直し、5枚とも
+画素単位で今のファイルと一致した(図が今の処理と食い違っていないことの確認)。
 
 ## 2026-09-24 のコード点検で作った図
 
 どれも研究結果(RMSE)ではなく、判定や確認の仕組み、軌跡の様子を説明するための図。使ったデータは既存の
 実測3本(`pdr_log_0805_1438/1441/1442`)で、調整用データであって評価用データではない。
-架空データの図以外の4枚は `make_figures_20260924.py` で作り直せる(推定軌跡の2枚はこのフォルダの外に置いてある。下の各項目を参照)(`i22satou/` で `python figures/make_figures_20260924.py`)。
+下の3枚は `make_figures_20260924.py` で作り直せる(推定軌跡の2枚はこのフォルダの外に置いてある。下の各項目を参照)(`i22satou/` で `python figures/make_figures_20260924.py`)。
+同じスクリプトは quick_check の図も作るが、卒論に使わないので `../削除候補/figures/` へ移した(作り直すとここに再び出る)。
 
 ### `20260924_移動様態判定_曲がりが終わらない問題_1441_1442.png`
 
@@ -24,17 +43,6 @@
 図は2026-09-24時点の設定(曲がり終了のヨーレートしきい値10度/秒)。このしきい値は同日、校正用の直線歩行から
 決める仕組み(`pdr_program/evaluation/calibrate_turn_threshold.py`)に変えた。値は計測日の calib の記録で決める
 (`memo/comparison_methods.md`)。
-
-### `20260924_quick_check方位判定_修正前後_1438_1441_1442.png`
-
-計測当日に使う `pdr_program/tools/quick_check.py` の「方位の正味回転」の判定を、修正前後で比べた図
-(想定0度、許容±45度)。
-
-- 修正前(オレンジの点): 記録の最初と最後の1サンプルの差。記録開始直後の方位の飛び(1438は126度、1442は
-  151度)を拾い、壊れた1438を「OK」、良好な1442を「異常」と判定していた。
-- 修正後(青い線): 最初の5歩と最後の5歩の平均方位の差。1438は+115度で「異常」、1441は−27度・1442は+2度で
-  「OK」になり、`memo/heading_calibration.md` の判断と一致する。
-- 灰色の帯が歩行区間(最初の歩から最後の歩まで)。
 
 ### `20260924_推定軌跡_4方式の比較_1441_1442_1438_seed42.png`
 
@@ -71,13 +79,30 @@
 全滅が起きなかった実行は両日で完全に同じ。目に見えて変わったのは方式Bの1442と提案方式の1441だけで、変わった
 実行には全滅後に乱数の使い方が変わった影響も含まれる(`memo/comparison_methods.md` の2026-09-24)。
 
-### `20260924_架空データ_評価ハーネス自己テスト_終点を含めた軌跡図.png`
+## 卒論第4章のフローチャート(`pdr_system_diagram`・`pdr_flow_main`・`pdr_flow_pf_detail`)
 
-**架空データの図(研究結果ではない)。** `pdr_program/evaluation/run_evaluation.py --self-test` が出した軌跡図の1枚
-(`--self-test-keep` で残したもの)。西向きにまっすぐ歩く架空の記録で、4方式の軌跡と正解位置(白丸と番号)を
-地図に重ねている。7番は「終点で立ち止まってから、最後の歩の1.5秒後にボタンを押した」設定の目印で、
-2026-09-24の修正(最後の歩から5秒以内に押した点は、最後の推定位置に止まっているとみなして評価に含める)により
-正解位置として評価に入るようになった。修正前は推定軌跡の時刻範囲外として外れていた。
+図4.1(システム全体の構成)・図4.2(1つのCSVの処理フロー)・図4.4(PFの1歩分の処理)。`.drawio` は
+`make_flowcharts.py` の出力で、`.png` はそれを描画したもの。2026-09-24 に、`pdr_pf_improved.py` の今の処理と
+卒論雛形の節・式番号に合わせて内容を直し、矢印を角の丸めのない直線・直角の折れ線にした。主な修正は次のとおり。
+
+- 式番号を雛形に合わせた(壁尤度5.6、経路帯の重み5.7、正規化5.8、重み付き平均5.9、粒子数の補正5.3・5.4、
+  分岐選別尤度5.5、経路方位補正5.1)。曲がり判定の節は5.4節ではなく4.7節。
+- 移動様態判定は歩が検出されたときだけ行うので、実際に出るのは直進と曲がりだけ(滞留は出ない)。
+- 全滅からの復帰を2026-09-24の変更(移動前の平均+その歩の移動量の周り)に合わせ、全滅回数の記録を復帰の前にした。
+- 本体は診断値のCSVを出さない(PNGは毎回、軌跡CSVはオプション指定時だけ)。開始位置の入力と、様態判定から
+  経路方位補正への「曲がり」の矢印を足した。経路方位補正は中心線の変種・手動経路のときだけ働く。
+- 目印表はクリック方式(`pick_landmarks.py`)ではなく `make_route_landmarks.py` で作る。`run_evaluation.py` が一括実行する。
+
+作り直すときは `figures/` で次の2つを順に実行する。
+
+    python make_flowcharts.py      # .drawio を作る
+    python render_flowcharts.py    # .png(2倍)を作る
+
+`make_flowcharts.py` は書き出し時に、線が斜めになっていないか、線が他の図形を貫通していないか、文字が
+はみ出しそうでないかを調べ、問題があれば「要確認」と表示する。`render_flowcharts.py` は draw.io(デスクトップ版)が
+あればそのCLIで、無ければ Edge/Chrome のヘッドレス表示と draw.io 公式ビューア(ネット接続が要る)で描く。
+2026-09-24 の PNG は後者(Windows)で作った。draw.io で手編集した場合も、この2つ目だけ実行すればよい。
+`check_flowcharts.py` は Mac の draw.io で書き出した SVG を使う、より細かい検査(文字と線の重なりも見る)。
 
 ## 卒論第5章の図(2026-09-24)
 
