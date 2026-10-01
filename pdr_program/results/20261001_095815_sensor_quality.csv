@@ -1,0 +1,4 @@
+file,n_samples,duration_sec,sampling_hz,yaw_rate_method,yaw_rate_std_dps,yaw_rate_max_dps,turning_ratio,acc_mag_std,acc_mag_mean,yaw_deg_diff_std,yaw_deg_diff_max,yaw_deg_net_change
+pdr_log_0805_1438.csv,3530,66.8,52.9,yaw_degの変化率,42.2,650.3,0.342,0.84,1.81,2.46,126.16,-31.7
+pdr_log_0805_1441.csv,2547,48.2,52.9,yaw_degの変化率,31.0,233.6,0.296,0.808,1.87,0.73,7.6,-81.9
+pdr_log_0805_1442.csv,2420,45.8,52.9,yaw_degの変化率,28.5,180.2,0.278,0.846,1.96,3.14,151.3,-152.8

@@ -2,6 +2,9 @@
 # calibrate_turn_threshold.py
 #
 # 【変更履歴】
+# - 2026-10-01: ヨーレートを本体と同じ compute_behavior_yaw_rate() で求めるようにした(yaw_degが
+#               あればその変化率。従来のジャイロの重力方向への投影は、acc_*が重力を含まない
+#               0805の3件ではヨーレートにならなかった。memo/comparison_methods.md)。
 # - 2026-09-24: [本研究独自] 新規作成。移動様態判定の「曲がり終了のヨーレートしきい値」
 #               (adaptive_pf.turn_exit_yaw_rate_threshold_deg_s)を、校正用の直線歩行から決める。
 #
@@ -83,6 +86,8 @@ def analyze_file(csv_path):
 
     ヨーレートと方位の履歴は、本体のメインループと同じ規則で作る(サンプル間隔が0以下か
     MAX_DTを超える行は0のまま)。方位はandroid(yaw_deg)。列が無ければ方位変化はNaN。
+    ヨーレートも本体と同じ compute_behavior_yaw_rate() で求める(yaw_degがあればその変化率、
+    無ければジャイロの重力方向への投影。2026-10-01)。
     """
     df = pdrmod.validate_log(pdrmod.safe_read_csv(csv_path), csv_path.name)
     if len(df) < 2:
@@ -98,10 +103,13 @@ def analyze_file(csv_path):
     if len(steps) < 2:
         raise ValueError(f"歩数が{len(steps)}歩しか検出されない")
 
-    g = df[["gyro_x", "gyro_y", "gyro_z"]].to_numpy(float)
-    a = df[["acc_x", "acc_y", "acc_z"]].to_numpy(float)
     has_yaw = "yaw_deg" in df.columns and df["yaw_deg"].notna().any()
     yaw = np.deg2rad(pd.to_numeric(df["yaw_deg"], errors="coerce").to_numpy(float)) if has_yaw else None
+    behavior_yaw_rate, _ = pdrmod.compute_behavior_yaw_rate(df, "android" if has_yaw else "gyro")
+    has_gravity, acc_mean_mag = pdrmod.acc_includes_gravity(df)
+    if not has_yaw and not has_gravity:
+        print(f"[警告] {csv_path.name}: yaw_degが無く、acc_*も重力を含まない(平均{acc_mean_mag:.2f}m/s²)"
+              "ので、ヨーレートが正しくない")
     yaw_rate = np.zeros(len(df))
     heading = np.zeros(len(df))
     reference = None
@@ -109,7 +117,7 @@ def analyze_file(csv_path):
         dt = t[i] - t[i - 1]
         if dt <= 0 or dt > pdrmod.MAX_DT:
             continue
-        yaw_rate[i] = pdrmod.get_yaw_rate(*g[i], *a[i])
+        yaw_rate[i] = behavior_yaw_rate[i]
         if has_yaw and np.isfinite(yaw[i]):
             if reference is None:
                 reference = yaw[i]
@@ -293,14 +301,17 @@ def _write_synthetic_straight_walk(path, n_steps, cadence, sway_deg_s, rng, hz=5
                                    start_swing_deg=30.0):
     """架空の直線歩行。前に3秒・後に2秒の静止。歩行中は歩調と同じ周期でヨーが揺れ
     (振幅sway_deg_s)、歩き始めの1秒で方位がstart_swing_deg動く(0805の1441の歩き始めに
-    似せた、曲がり判定に入るきっかけ)。数値は研究結果ではない。"""
+    似せた、曲がり判定に入るきっかけ)。yaw_degにはgyro_zの揺れを積分したものを入れる
+    (yaw_degは時計回りが正、gyro_zは反時計回りが正なので符号は逆)。数値は研究結果ではない。"""
     still = 3.0
     walk = n_steps / cadence
     t = np.arange(0.0, still + walk + 2.0, 1.0 / hz)
     walking = (t >= still) & (t < still + walk)
     bounce = 3.0 * (np.sin(2 * np.pi * cadence * (t - still) - np.pi / 2) + 1.0) / 2
     gyro_z = np.where(walking, np.deg2rad(sway_deg_s) * np.sin(2 * np.pi * cadence * (t - still)), 0.0)
-    yaw = 37.0 + start_swing_deg * np.clip(t - still, 0.0, 1.0)
+    sway_angle = np.where(walking, -sway_deg_s / (2 * np.pi * cadence)
+                          * (1.0 - np.cos(2 * np.pi * cadence * (t - still))), 0.0)
+    yaw = 37.0 + start_swing_deg * np.clip(t - still, 0.0, 1.0) - sway_angle
     pd.DataFrame({
         "timestamp": 1000.0 + t,
         "acc_x": rng.normal(0, 0.02, len(t)), "acc_y": rng.normal(0, 0.02, len(t)),
@@ -315,7 +326,9 @@ def _self_test():
 
     【重要】ここで使う信号はすべて架空であり、出てくる数値を研究結果として扱わない。
     ヨーの揺れを振幅Aの正弦波にすると、|A sin|の75パーセンタイルは A×sin(67.5度)≒0.924A
-    になるので、推奨値がその近くに出るかを見る。
+    になるので、推奨値がその近くに出るかを見る。本体はyaw_degの約0.1秒の差からヨーレートを
+    求めるので、振幅は sinc(π×歩調×0.1秒) 倍に縮む(歩調1.5〜2.1歩/秒で0.93〜0.96倍)。
+    期待値には3本の歩調の中央(1.8歩/秒)の係数を掛ける。
     """
     print("--- self-test 開始(架空データ。数値は研究結果ではない) ---")
     config = PROGRAM_DIR / "map_configs" / "kanri_4f.json"
@@ -337,7 +350,8 @@ def _self_test():
 
         summary = calibrate(td / "list.csv", td / "data", config, out_root=td / "out",
                             tag="selftest", synthetic=True)
-        expected = sway * math.sin(math.radians(67.5))
+        x = math.pi * 1.8 * pdrmod.BEHAVIOR_YAW_RATE_LAG_SEC
+        expected = sway * math.sin(math.radians(67.5)) * math.sin(x) / x
         assert abs(summary["recommended_deg_s"] - expected) < 1.5, (summary["recommended_deg_s"], expected)
         print(f"  OK: 推奨値 {summary['recommended_deg_s']:.2f} 度/秒が、揺れの振幅{sway:g}度/秒から"
               f"決まる75%値 {expected:.2f} の近く")

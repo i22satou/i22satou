@@ -4,6 +4,11 @@
 # 【変更履歴】
 # 全履歴はCHANGELOG.md。変更したらCHANGELOG.mdの先頭へ日付付きで1項目追加すること。
 # 直近のみ下記に残す(古い項目は消してよい):
+# - 2026-10-01: [本研究独自] 移動様態判定のヨーレートを、heading_source=androidではyaw_degの
+#               変化率にした(compute_behavior_yaw_rate)。従来のジャイロの重力方向への投影は、
+#               acc_*が重力を含まない0805の3件ではヨーレートにならなかった。方式C・Eなど
+#               移動様態判定を使う方式の結果が変わる。gyroでは従来どおりで、acc_*が重力を
+#               含まなければ警告を出す。詳細はCHANGELOG.md・memo/comparison_methods.md。
 # - 2026-09-25: 未使用の定数・変数と古い経緯のコメントを削除(動作は不変)。
 # - 2026-09-24: [本研究独自] (1)曲がり終了のヨーレートしきい値を独立した設定値にした
 #               (adaptive_pf.turn_exit_yaw_rate_threshold_deg_s、--turn-exit-yaw-rate-
@@ -46,6 +51,8 @@
 # - --heading-source gyroを指定した場合は、ジャイロと加速度を用いた
 #   Madgwickフィルタ(updateIMU)で方位を推定する。磁気センサによる融合は
 #   2026-09-02に削除した(全CSVにmag列が無く、コードが動いていなかったため)。
+#   updateIMUはacc_*を重力の向きとして使うので、acc_*が重力を含まない線形加速度の
+#   データ(pdr_log_0805_*)ではこの方位は正しくない(実行時に警告を出す)。
 # - --heading-source androidを指定した場合は、
 #   AndroidのTYPE_ROTATION_VECTORから記録したyaw_degを使用する。
 # - android方式を使用する場合は、入力CSVにyaw_deg列が必要である。
@@ -332,6 +339,13 @@ TURN_YAW_RATE_THRESHOLD = np.deg2rad(20.0)
 # calib)の揺れから evaluation/calibrate_turn_threshold.py で決め、JSONの
 # adaptive_pf.turn_exit_yaw_rate_threshold_deg_s に書く。JSONに無ければ従来どおり半分の値。
 TURN_EXIT_YAW_RATE_THRESHOLD = np.deg2rad(10.0)
+# [本研究独自] 移動様態判定のヨーレートをyaw_degの変化率で求めるときの時間差(約5行分)と、
+# それ以上離れていたら記録の欠けとして使わない時間差(compute_behavior_yaw_rate参照)。
+BEHAVIOR_YAW_RATE_LAG_SEC = 0.1
+BEHAVIOR_YAW_RATE_MAX_SPAN_SEC = 0.5
+# 加速度の大きさの平均がこれ未満なら、acc_*は重力を含まない線形加速度とみなす
+# (重力を含めば約9.8、0805の3件は1.8〜2.0。acc_includes_gravity参照)。
+GRAVITY_PRESENT_MIN_ACC_MEAN = 5.0
 PARTICLE_RESIZE_JITTER_PX = 0.50
 
 # [本研究独自] 不確実性適応粒子数。移動様態(直進/曲がり)による粒子数決定
@@ -2087,15 +2101,79 @@ def estimate_smartpdr_step_length_px(step_acc: pd.Series, peak_idx: int, valley_
 
 
 def get_yaw_rate(gyro_x, gyro_y, gyro_z, acc_x, acc_y, acc_z):
-    """【物理演算最適化】
-    ジャイロ角速度ベクトルと重力方向（正規化加速度ベクトル）の内積により、
-    三角関数によるロール・ピッチ投影演算およびオイラー角特有の特異点(ジンバルロック)を完全に排除し、
-    劇的に高速かつ数値的に安定したヨーレート算出を実現します。
+    """ジャイロ角速度を加速度の向き(重力方向とみなす)へ投影したヨーレート[rad/s]。
+
+    acc_*が重力を含む(TYPE_ACCELEROMETER)ときだけ鉛直軸まわりの回転になる。0805の3件の
+    acc_*は重力を含まない線形加速度なので、この値はヨーレートにならない(2026-10-01、
+    memo/comparison_methods.md)。符号は鉛直上向き軸まわりの反時計回り(左回り)が正。
     """
     norm = np.sqrt(acc_x**2 + acc_y**2 + acc_z**2)
     if norm < 1e-6:
         return gyro_z  # 加速度データが得られない場合の安全なフォールバック
     return (gyro_x * acc_x + gyro_y * acc_y + gyro_z * acc_z) / norm
+
+
+def gravity_projected_yaw_rate(df):
+    """get_yaw_rate()を配列向けに書いたもの(式は同一)。DataFrame全行の値を返す。"""
+    g = df[["gyro_x", "gyro_y", "gyro_z"]].to_numpy(float)
+    a = df[["acc_x", "acc_y", "acc_z"]].to_numpy(float)
+    norm = np.linalg.norm(a, axis=1)
+    safe_norm = np.where(norm < 1e-6, 1.0, norm)
+    return np.where(norm < 1e-6, g[:, 2], np.sum(g * a, axis=1) / safe_norm)
+
+
+def acc_includes_gravity(df):
+    """acc_*が重力を含むかを、加速度の大きさの平均で判定する。(判定, 平均[m/s²])を返す。
+
+    重力を含むTYPE_ACCELEROMETERなら約9.8、線形加速度(0805の3件)なら1.8〜2.0になる。
+    """
+    mean_mag = float(np.nanmean(compute_acc_magnitude(df)))
+    return mean_mag >= GRAVITY_PRESENT_MIN_ACC_MEAN, mean_mag
+
+
+def yaw_deg_rate(timestamps, yaw_deg, lag_sec=None, max_span_sec=None):
+    """yaw_deg列(度、北0・時計回り)の変化率[rad/s]を行ごとに返す(求まらない行はNaN)。
+
+    yaw_degは約23%の行で直前の行と同じ値が並ぶ(行は線形加速度のイベントごとに書かれ、
+    方位は最後に受け取った値を書くため)。1行ごとの差では0が混じるので、lag_sec以上前の
+    最も近い行との差を、その時間差で割る。±180度の折り返しはnormalize_angleで処理する。
+    時間差がmax_span_secを超える(記録の欠け)・どちらかが欠損の行はNaNにする。
+    記録の先頭から続く0.0は回転ベクトルを受け取る前の初期値なので欠損として扱う。
+    符号は時計回り(右回り)が正で、地図座標の方位(右0度・下90度)と同じ向き。
+    """
+    lag_sec = BEHAVIOR_YAW_RATE_LAG_SEC if lag_sec is None else lag_sec
+    max_span_sec = BEHAVIOR_YAW_RATE_MAX_SPAN_SEC if max_span_sec is None else max_span_sec
+    t = np.asarray(timestamps, dtype=float)
+    yaw = np.deg2rad(pd.to_numeric(pd.Series(yaw_deg), errors="coerce").to_numpy(float))
+    leading = 0
+    while leading < len(yaw) and yaw[leading] == 0.0:
+        leading += 1
+    yaw[:leading] = np.nan
+
+    rate = np.full(len(t), np.nan)
+    j = np.searchsorted(t, t - lag_sec, side="right") - 1
+    jj = np.maximum(j, 0)
+    span = t - t[jj]
+    ok = (j >= 0) & (span > 0) & (span <= max_span_sec) & np.isfinite(yaw) & np.isfinite(yaw[jj])
+    rate[ok] = normalize_angle(yaw[ok] - yaw[jj][ok]) / span[ok]
+    return rate
+
+
+# [本研究独自] 移動様態判定(behavior_window_stats)に使うヨーレートを全行分求める(2026-10-01)。
+# heading_source=android: yaw_degの変化率。加速度に重力が含まれるかどうかに関係なく、0805の
+#   線形加速度のデータにも今のアプリの重力を含むデータにも同じ方法が使え、方位変化の条件と
+#   同じ信号を見る。
+# heading_source=gyro(またはyaw_degが無い): 従来どおりジャイロを加速度の向きへ投影する。
+#   方位(Madgwick)と同じセンサーの値で判定するためで、重力を含むデータなら正しい。重力を
+#   含まないデータ(0805)では方位もこの値も正しくないので、呼び出し側が警告を出す。
+# 判定は絶対値しか使わないので、両者の符号の向きが逆(上の各関数のdocstring)でも影響しない。
+def compute_behavior_yaw_rate(df, heading_source):
+    """(各行のヨーレート[rad/s], 求め方の説明)を返す。"""
+    if heading_source == "android" and "yaw_deg" in df.columns:
+        rate = yaw_deg_rate(df["timestamp"].to_numpy(float), df["yaw_deg"])
+        if np.isfinite(rate).any():
+            return rate, "yaw_degの変化率"
+    return gravity_projected_yaw_rate(df), "ジャイロの重力方向への投影"
 
 
 def normalize_angle(angle):
@@ -2578,6 +2656,29 @@ def redraw_all_paths():
             gyro_angle          = 0.0
             heading_history     = np.zeros(len(df))
             yaw_rate_history    = np.zeros(len(df))
+            # [本研究独自] 移動様態判定に使うヨーレート(2026-10-01。compute_behavior_yaw_rate参照)。
+            # 下のループのyaw_rate(ジャイロの重力方向への投影)はgyro方位の積算にだけ使う。
+            behavior_yaw_rate, behavior_yaw_rate_method = compute_behavior_yaw_rate(
+                df, args.heading_source
+            )
+            has_gravity, acc_mean_mag = acc_includes_gravity(df)
+            logging.info(
+                "  移動様態判定のヨーレート: %s (加速度の大きさの平均=%.2fm/s², 重力%s)",
+                behavior_yaw_rate_method,
+                acc_mean_mag,
+                "あり" if has_gravity else "なし",
+            )
+            if not has_gravity:
+                # Madgwick(updateIMU)と重力方向への投影はacc_*を重力として使うので、重力を
+                # 含まない線形加速度(0805の3件)ではgyro方式の方位もヨーレートも正しくない。
+                message = (
+                    "  acc_*が重力を含まない(線形加速度とみられる)。heading_source=gyroの方位"
+                    "(Madgwick)とジャイロの重力方向への投影は正しくない"
+                )
+                if args.heading_source == "gyro":
+                    logging.warning(message + "。heading_source=androidを使うこと。")
+                else:
+                    logging.info(message + "(androidではyaw_degが欠けた行の方位の代わりにだけ使う)。")
             step_set            = set(step_indices)
             current_behavior    = MoveBehavior.STRAIGHT
             behavior_history    = []
@@ -2655,6 +2756,8 @@ def redraw_all_paths():
                             row['acc_y'],
                             row['acc_z']
                         ])
+                        # updateIMUはaccを重力の向きとして姿勢を補正する。acc_*が重力を含まない
+                        # データ(0805の3件)ではこの方位は正しくない(上の警告を参照)。
                         Q[i] = madgwick.updateIMU(q=Q[i - 1], gyr=gyro, acc=acc)
 
                         rot = R.from_quat([Q[i][1], Q[i][2], Q[i][3], Q[i][0]])
@@ -2685,7 +2788,7 @@ def redraw_all_paths():
                     raw_heading - initial_sensor_heading + initial_map_heading
                 )
                 heading_history[i] = heading
-                yaw_rate_history[i] = yaw_rate
+                yaw_rate_history[i] = behavior_yaw_rate[i]
 
                 if i not in step_set:
                     continue

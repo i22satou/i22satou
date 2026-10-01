@@ -1,5 +1,18 @@
 <!-- 新しい項目はこの直下に追加する。2026-09-02以前の項目はCHANGELOG_archive.md。月が変わったら前月分をアーカイブへ移す。 -->
 
+## 2026-10-01
+
+(0) [本研究独自] 移動様態判定に使うヨーレートを、`heading_source=android`では yaw_deg の変化率
+    (約0.1秒以上前の最も近い行との差を時間差で割る。`compute_behavior_yaw_rate()`・`yaw_deg_rate()`)
+    にした。従来のジャイロの重力方向への投影(`get_yaw_rate()`)は gyro 方式の方位の積算にだけ残す。
+    `heading_source=gyro`(または yaw_deg が無い)では従来どおり投影を使う。acc_* が重力を含むかを
+    加速度の大きさの平均(5 m/s²未満なら線形加速度)で調べてログに出し、含まないときは gyro 方式で
+    警告する。Madgwick にも同じ注意をコメントで書いた。**方式C・Eなど移動様態判定を使う方式の
+    結果が変わる**(既存3本で曲がり判定の割合 98/81/87% → 82/100/86%)。方式A・Bと gyro 方式は不変。
+    `evaluation/calibrate_turn_threshold.py`・`check_sensor_quality.py` も同じ関数を使うようにした
+    (前者の自己検査の架空データは yaw_deg にも揺れを入れた。後者は求め方と加速度の大きさの平均の列を追加)。
+    前後比較は `results/20261001_yawrate_fix_comparison/`、判断は memo/comparison_methods.md。
+
 ## 2026-09-25
 
 (0) 不要なコードとコメントの削除(動作は不変)。`pdr_pf_improved.py`: 未使用の定数

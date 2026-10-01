@@ -2,6 +2,11 @@
 # check_sensor_quality.py
 #
 # 【変更履歴】
+# - 2026-10-01: yaw_rateを本体と同じ compute_behavior_yaw_rate() で求めるようにした(yaw_deg列が
+#               あればその変化率、無ければジャイロの重力方向への投影)。従来の投影は、acc_*が
+#               重力を含まない0805の3件ではヨーレートにならなかった(memo/comparison_methods.md)。
+#               求め方の列(yaw_rate_method)と、重力の有無の目安になる加速度の大きさの平均
+#               (acc_mag_mean)を追加した。
 # - 2026-08-16: コード肥大化対策として、fake_args組み立てコード(pick_landmarks.py
 #               ・verify_route_graph.pyと3重に重複していた)をpdr_pf_improved.py側の
 #               load_map_config_for_tool()に一本化し、このスクリプトはそれを
@@ -34,11 +39,12 @@
 # import して再利用するだけの、生データに対する統計計算のみを行う。
 #
 # 計算する指標:
-#   - yaw_rate(ジャイロ角速度を重力方向へ投影した値。移動様態判定に実際に
-#     使われている量そのもの): 標準偏差・絶対値の最大値・
+#   - yaw_rate(移動様態判定に実際に使われている量そのもの。yaw_deg列があればその
+#     変化率、無ければジャイロ角速度を重力方向へ投影した値): 標準偏差・絶対値の最大値・
 #     turn_yaw_rate_threshold_deg_s(既定20deg/s)を超えるサンプルの割合
 #     (この割合が高いCSVほど「曲がり」に誤判定されやすい)。
-#   - acc_mag(加速度合成値、重力込み): 標準偏差(手ぶれ・振動の指標)。
+#   - acc_mag(加速度合成値): 標準偏差(手ぶれ・振動の指標)と平均(重力を含めば約9.8、
+#     0805の3件のような線形加速度なら約2で、重力を含むかどうかの目安)。
 #   - yaw_deg(Android回転ベクトルセンサ由来、heading-source=androidで実際に
 #     使われる方位そのもの。列が無いCSVでは計算しない):
 #     サンプル間の差分の標準偏差・最大絶対値(値が大きいほど、機器融合方位が
@@ -76,34 +82,32 @@ def analyze_csv(path, gyro_unit, turn_yaw_rate_threshold_rad):
     n_samples = len(df)
     sampling_hz = n_samples / duration_sec if duration_sec > 0 else float("nan")
 
-    # pdr_pf_improved.get_yaw_rate()は1行ずつのスカラー入力を想定しており(if norm < 1e-6
-    # の分岐が配列だと使えない)、同じ計算式(ジャイロ角速度と重力方向の内積)を配列向けに
-    # 書き直したもの。数式自体はget_yaw_rate()と完全に同一。
-    gx = df["gyro_x"].to_numpy()
-    gy = df["gyro_y"].to_numpy()
-    gz = df["gyro_z"].to_numpy()
-    ax = df["acc_x"].to_numpy()
-    ay = df["acc_y"].to_numpy()
-    az = df["acc_z"].to_numpy()
-    norm = np.sqrt(ax**2 + ay**2 + az**2)
-    safe_norm = np.where(norm < 1e-6, 1.0, norm)
-    yaw_rate = np.where(norm < 1e-6, gz, (gx * ax + gy * ay + gz * az) / safe_norm)
+    # 本体の移動様態判定と同じ求め方(yaw_degがあればその変化率。求まらない行はNaNなので除く)。
+    has_yaw = "yaw_deg" in df.columns and df["yaw_deg"].notna().sum() > 1
+    yaw_rate, yaw_rate_method = pdrmod.compute_behavior_yaw_rate(df, "android" if has_yaw else "gyro")
+    yaw_rate = yaw_rate[np.isfinite(yaw_rate)]
     yaw_rate_std_dps = float(np.std(yaw_rate)) * 180.0 / np.pi
     yaw_rate_max_dps = float(np.max(np.abs(yaw_rate))) * 180.0 / np.pi
     turning_ratio = float(np.mean(np.abs(yaw_rate) > turn_yaw_rate_threshold_rad))
 
     acc_mag = pdrmod.compute_acc_magnitude(df)
     acc_mag_std = float(np.std(acc_mag))
+    has_gravity, acc_mag_mean = pdrmod.acc_includes_gravity(df)
+    if not has_yaw and not has_gravity:
+        print(f"[警告] {path.name}: yaw_degが無く、acc_*も重力を含まないので、yaw_rateが正しくない",
+              file=sys.stderr)
 
     result = {
         "file": path.name,
         "n_samples": n_samples,
         "duration_sec": round(duration_sec, 1),
         "sampling_hz": round(sampling_hz, 1),
+        "yaw_rate_method": yaw_rate_method,
         "yaw_rate_std_dps": round(yaw_rate_std_dps, 1),
         "yaw_rate_max_dps": round(yaw_rate_max_dps, 1),
         "turning_ratio": round(turning_ratio, 3),
         "acc_mag_std": round(acc_mag_std, 3),
+        "acc_mag_mean": round(acc_mag_mean, 2),
     }
 
     if "yaw_deg" in df.columns and df["yaw_deg"].notna().sum() > 1:
@@ -163,8 +167,8 @@ def main():
 
     columns = [
         "file", "n_samples", "duration_sec", "sampling_hz",
-        "yaw_rate_std_dps", "yaw_rate_max_dps", "turning_ratio", "acc_mag_std",
-        "yaw_deg_diff_std", "yaw_deg_diff_max", "yaw_deg_net_change",
+        "yaw_rate_method", "yaw_rate_std_dps", "yaw_rate_max_dps", "turning_ratio",
+        "acc_mag_std", "acc_mag_mean", "yaw_deg_diff_std", "yaw_deg_diff_max", "yaw_deg_net_change",
     ]
 
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
@@ -179,7 +183,7 @@ def main():
 
     header = (
         f"{'file':<24}{'n':>6}{'秒':>7}{'Hz':>6}"
-        f"{'yawσ(°/s)':>11}{'yawmax(°/s)':>12}{'曲がり率':>9}{'accσ':>8}"
+        f"{'yawσ(°/s)':>11}{'yawmax(°/s)':>12}{'曲がり率':>9}{'accσ':>8}{'acc平均':>8}"
         f"{'yawdegσ(°)':>12}{'yawdegmax(°)':>13}{'yawdeg純変化(°)':>15}"
     )
     print(header)
@@ -192,7 +196,7 @@ def main():
         print(
             f"{r['file']:<24}{r['n_samples']:>6}{r['duration_sec']:>7.1f}{r['sampling_hz']:>6.1f}"
             f"{r['yaw_rate_std_dps']:>11.1f}{r['yaw_rate_max_dps']:>12.1f}"
-            f"{r['turning_ratio']:>9.3f}{r['acc_mag_std']:>8.3f}"
+            f"{r['turning_ratio']:>9.3f}{r['acc_mag_std']:>8.3f}{r['acc_mag_mean']:>8.2f}"
             f"{fmt(r['yaw_deg_diff_std'], 12, 2)}{fmt(r['yaw_deg_diff_max'], 13, 2)}"
             f"{fmt(r['yaw_deg_net_change'], 15, 1)}"
         )
