@@ -7,6 +7,11 @@
 
 | 図 | ファイル | 作り方 |
 |---|---|---|
+| 1.1 | `fig1_1_cumulative_error.png` | `concept_figures.py`(概念図。方位が3度ずれた場合の計算値) |
+| 1.2 | `fig1_2_route_input.png` | `concept_figures.py`(二値地図と、本体と同じ手動経路帯・自動抽出の作り方) |
+| 2.1 | `fig2_1_pdr_update.png` | `concept_figures.py`(概念図。実測データは使わない) |
+| 2.2 | `fig2_2_pf_update.png` | `concept_figures.py`(概念図。粒子は乱数で置いた説明用で、実験結果ではない) |
+| 2.3 | `fig2_3_behavior_spread.png` | `concept_figures.py`(概念図。粒子数は秋山2013の値、ノイズは説明用) |
 | 3.1 | `fig3_1_map_route.png` | `thesis_figures.py` |
 | 3.2 | `fig3_2_sensor_example.png` | `thesis_figures.py` |
 | 4.1 | `pdr_system_diagram.png` | `make_flowcharts.py` → `render_flowcharts.py` |
