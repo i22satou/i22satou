@@ -78,7 +78,8 @@
 - 秋山の課題(開けた空間、様態判定の失敗)は、本研究の経路帯抽出と屈折判定の改良の動機として書ける。
 - 本文で、粒子数を適応的に変える既存手法として Heinemann ら(IROS 2006)と KLDサンプリング(Kwok ら、ICRA 2003)を挙げている。
   本研究の不確実性適応粒子数は、この系統の考え方に近い。**「本研究独自」と書くのは「様態別の粒子数にNeff比率による増減を重ねた組み合わせ」の範囲にとどめる**。
-  KLDサンプリングを引用するなら原文(D. Fox, IJRR vol.22, no.12, pp.985–1004, 2003。上田2005の文献[8])を読んでから(**未読**)。
+  KLDサンプリングの原文(Fox2003)は2026-09-30に確認し、卒論[13]として引用済み(下の「2.6節用の文献」)。
+  Heinemann ら(推定精度に応じて粒子数を変える方法)は**未読**で、卒論では名前を出さず文献にも挙げていない。
 - `pdr_pf_improved.py`冒頭付近のコメント(「原論文の0/1二値重みではなく…連続的な尤度重み付けに拡張」)は、0/1の処理が残っている実装と合わない。卒論では「0/1に加えて連続的な重み」と書く。
 
 **確認状況**: 本文と表は読めた(表2〜5は2段組みが崩れていて、最大誤差の対応が曖昧)。式(1)〜(9)は画像から確認した。
@@ -266,3 +267,21 @@ IEEE Sensors Journal, vol.15, no.5, pp.2906–2916, May 2015.(KAIST)
   **尤度に基づいて粒子数を変える方法の欠点**: 対称な環境で候補が4か所に分かれた状態と、1か所に定まった状態で
   観測の平均尤度がほぼ同じになり、区別できない(Sec.3.1、図3)。本研究のNeffも重みから計算するため、同じ弱点を
   持ちうる → 8章の考察・限界の材料。
+
+## 3.2節用の文献(2026-10-01追加)
+
+- **AndroidPosition**: Android Developers, "Position sensors",
+  https://developer.android.com/develop/sensors-and-location/sensors/sensors_position (2026-10-01閲覧)。卒論[15]。
+  ゲーム回転ベクトルは回転ベクトルと同じだが「地磁気を使わない」点だけが違う、北の向きを気にしないなら
+  地磁気に頼る通常の回転ベクトルの代わりに使う、とある。→ **TYPE_ROTATION_VECTOR(=yaw_deg)は地磁気を使い、磁北基準**。
+- 卒論への影響: CSVに地磁気の列は無いが、yaw_degそのものはOS内で磁北に合わせられている。2.6(412行付近)・
+  4.x(692行付近)・8章(1841行・1924行付近)の「地磁気が無いので磁北で補正できない」という書き方は、
+  各章の校正時に「CSVに地磁気の生値が無い」「ジャイロ・Madgwick方式は磁北を使わない」の意味に直す。
+- 計測アプリのCSVは`TYPE_LINEAR_ACCELERATION`のイベントごとに1行を書き、加速度・ジャイロ・方位は最後に
+  受け取った値(MainActivity.kt 475〜490行、memo/android_app.md)。0805の3件でジャイロ16〜19%、方位23〜24%の行が
+  直前と同値。サンプル間隔は約18.9msでほぼ一定(52.85Hz)。
+- **AndroidMotion**: Android Developers, "Motion sensors",
+  https://developer.android.com/develop/sensors-and-location/sensors/sensors_motion (2026-10-01閲覧)。卒論[14]。
+  線形加速度は "excluding gravity"、"linear acceleration = acceleration - acceleration due to gravity"。
+  加速度センサは "including the force of gravity"。単位は加速度 m/s²、ジャイロ rad/s(Table 1)。
+- 0805の3件のacc_*は重力を含まない(memo/android_app.md 2026-10-01)。卒論3.2・3.3はそのように書いた。

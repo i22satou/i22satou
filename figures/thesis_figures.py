@@ -93,7 +93,7 @@ def fig_map_route():
     ax.set_ylim(h, 0)
     ax.set_xlabel("x [px]  (1 px = 1/11.4 m)")
     ax.set_ylabel("y [px]")
-    ax.set_title(f"管理棟4階の二値地図({w}×{h} px ≒ {w/SCALE:.0f}×{h/SCALE:.0f} m)"
+    ax.set_title(f"専門科目棟4階の二値地図({w}×{h} px ≒ {w/SCALE:.0f}×{h/SCALE:.0f} m)"
                  "と歩行経路\n白: 移動可能領域(廊下・室内)  黒: 壁・移動不可領域")
     ax.legend(loc="upper left", fontsize=10)
     save(fig, "fig3_1_map_route")
