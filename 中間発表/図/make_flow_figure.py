@@ -1,6 +1,7 @@
 """中間発表レジュメ用の簡略版処理フロー図(1段幅)を作る。
 
 出力: 図1_処理の流れ_簡略.png(このスクリプトと同じフォルダ)
+     --poster を付けると、ポスター用の高解像度版を poster/poster_処理の流れ.png に出す
 色分けは figures/pdr_flow_main.png と同じ(青: 先行研究の手法、橙: 本研究で加えた処理、灰: 入出力)。
 """
 from pathlib import Path
@@ -80,6 +81,13 @@ for i, (c, label) in enumerate([(BLUE, "先行研究の手法"), (ORANGE, "本�
                                 fc=c[0], ec=c[1], lw=0.6))
     ax.text(25 + i * 34, -4, label, fontsize=5.6, va="center")
 
-out = Path(__file__).with_name("図1_処理の流れ_簡略.png")
-fig.savefig(out, bbox_inches="tight", pad_inches=0.02)
+import sys  # noqa: E402
+
+if "--poster" in sys.argv:
+    out = Path(__file__).with_name("poster") / "poster_処理の流れ.png"
+    out.parent.mkdir(exist_ok=True)
+    fig.savefig(out, dpi=1300, bbox_inches="tight", pad_inches=0.02)
+else:
+    out = Path(__file__).with_name("図1_処理の流れ_簡略.png")
+    fig.savefig(out, bbox_inches="tight", pad_inches=0.02)
 print("保存:", out)
