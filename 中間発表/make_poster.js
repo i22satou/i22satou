@@ -65,21 +65,21 @@ T("佐藤 壮真（浦上研究室）", { x: M + 0.8, y: 5.15, w: W - 2 * M - 1.
 let y = 7.0;
 y = section(X1, y, 1, "研究背景");
 bullets([
-  "屋内ではGNSS(GPS)の信号が弱く，測位が難しい[1]",
+  "屋内ではGPS（GNSS）の信号が弱く，測位が難しい[1]",
   "Wi-Fi・BLEビーコンは，発信機の設置や維持にコストがかかる[2]",
-  "スマートフォンのセンサで位置を積み上げる歩行者推測航法(PDR)は設備不要だが，歩くほど誤差が累積する[2]",
+  "スマートフォンの慣性計測装置（IMU）で歩数・歩幅・方位を求めて位置を積み上げる歩行者推測航法（PDR：Pedestrian Dead Reckoning）は設備不要だが，歩くほど誤差が累積する[2]",
 ], { x: X1, y, w: CW, h: 3.1 });
 y += 3.2;
 let h = img("poster_誤差の累積.png", X1 + 1.8, y, CW - 3.6);
 y += h + 0.05;
-caption("方位が3度ずれると，30m歩いた時点で推定が壁を通り抜ける(計算例)", X1, y, CW);
+caption("方位が3度ずれると，30m歩いた時点で推定が壁を通り抜ける（計算例）", X1, y, CW);
 y += 0.9;
 
 y = section(X1, y, 2, "目的");
 s.addShape(pres.shapes.ROUNDED_RECTANGLE, { x: X1, y, w: CW, h: 1.75, fill: { color: C.tealTint }, line: { color: C.tealTint }, rectRadius: 0.2 });
 T("追加の設備なしで，建物の地図だけでPDRの誤差を抑える", { x: X1 + 0.4, y: y + 0.1, w: CW - 0.8, h: 1.55, fontSize: 38, bold: true, color: C.teal, valign: "middle" });
 y += 2.05;
-T("移動様態適応PF[4]（直進・曲がりで粒子数とノイズを変える方式）に，次の2点を加える", { x: X1, y, w: CW, h: 1.1, fontSize: 30 });
+T("移動様態適応パーティクルフィルタ（PF）[4]（直進・曲がり・滞留の様態ごとに粒子数とノイズを変える方式）に，次の2点を加える", { x: X1, y, w: CW, h: 1.1, fontSize: 30 });
 y += 1.3;
 // 提案カード
 const cardW = (CW - 0.5) / 2, cardH = 7.5;
@@ -88,11 +88,11 @@ const card = (x, title, body) => {
   T(title, { x: x + 0.35, y: y + 0.3, w: cardW - 0.7, h: 1.4, fontSize: 36, bold: true, color: C.teal });
   T(body, { x: x + 0.35, y: y + 4.95, w: cardW - 0.7, h: cardH - 5.1, fontSize: 26, lineSpacingMultiple: 1.1 });
 };
-card(X1, "提案1\n経路帯の自動抽出", "二値化した平面図から通路を自動で抽出し，経路帯の外に出た粒子の重みを下げる．経路の手入力は不要");
+card(X1, "提案1\n経路帯の自動抽出", "二値化した平面図から通路を経路帯として自動で抽出し，経路帯の外の粒子は重みを0にする．経路の手入力は不要");
 img("poster_経路帯.png", X1 + 0.25, y + 1.95, cardW - 0.5);
-card(X1 + cardW + 0.5, "提案2\n不確実性適応粒子数", [{ text: "前の歩の比率 r = N" }, { text: "eff", options: { subscript: true } }, { text: "/N が0.30未満なら粒子数を1.5倍，0.60超なら0.75倍(80〜1200個)" }]);
+card(X1 + cardW + 0.5, "提案2\n不確実性適応粒子数", [{ text: "直前の1歩での比率 " }, { text: "r", options: { italic: true } }, { text: " = " }, { text: "N", options: { italic: true } }, { text: "eff", options: { subscript: true } }, { text: "/" }, { text: "N", options: { italic: true } }, { text: " が0.30未満なら粒子数を1.5倍，0.60超なら0.75倍にする．上下限の80〜1200個は，粒子数を変えた実験で確かめた" }]);
 img("poster_式_Neff.png", X1 + cardW + 0.5 + 0.9, y + 2.1, cardW - 1.8);
-T([{ text: "N" }, { text: "eff", options: { subscript: true } }, { text: "：有効粒子数(効いている粒子の数)[5]" }], { x: X1 + cardW + 0.85, y: y + 3.95, w: cardW - 0.7, h: 0.9, fontSize: 22, color: C.muted });
+T([{ text: "N", options: { italic: true } }, { text: "eff", options: { subscript: true } }, { text: "：有効粒子数（効いている粒子の数）[5]" }], { x: X1 + cardW + 0.85, y: y + 3.95, w: cardW - 0.7, h: 0.9, fontSize: 22, color: C.muted });
 y += cardH + 0.5;
 
 y = section(X1, y, 3, "方法");
@@ -100,13 +100,13 @@ h = img("poster_処理の流れ.png", X1, y, 8.7);
 const sideX = X1 + 9.0, sideW = CW - 9.0;
 T([
   { text: "PDR", options: { bold: true, color: C.teal, breakLine: true } },
-  { text: "SmartPDR[3]で歩を検出し，歩幅と方位から移動量を求める．歩調の上限2.9Hzで過検出を防ぎ，歩幅に校正ゲイン(暫定2.10)を掛ける", options: { breakLine: true } },
+  { text: "SmartPDR[3]で1歩を検出し，歩幅と方位から移動量を求める．歩調の上限2.9Hzで過検出を防ぎ，歩幅に校正ゲイン（暫定値2.10）を掛ける", options: { breakLine: true } },
   { text: " ", options: { breakLine: true, fontSize: 14 } },
   { text: "移動様態", options: { bold: true, color: C.teal, breakLine: true } },
-  { text: "直近1.5秒の方位変化とヨーレート(75%値)で，直進／曲がりを判定する", options: { breakLine: true } },
+  { text: "直近1.5秒の方位変化と，ヨーレートの75パーセンタイルで，直進／曲がりを判定する", options: { breakLine: true } },
   { text: " ", options: { breakLine: true, fontSize: 14 } },
   { text: "PF", options: { bold: true, color: C.teal, breakLine: true } },
-  { text: "1歩ごとに粒子を動かし，壁を横切った粒子の重みを0にする[4]．壁に近い粒子と，経路帯の外の粒子は重みを下げる" },
+  { text: "1歩ごとに粒子を動かし，壁を横切った粒子と経路帯の外の粒子の重みを0にする[4]．壁に近い粒子は重みを下げる．歩行が検出されない滞留中は，PFを更新しない" },
 ], { x: sideX, y: y + 0.2, w: sideW, h: h - 0.2, fontSize: 26, lineSpacingMultiple: 1.12 });
 y += h + 0.4;
 
@@ -127,8 +127,8 @@ y = section(X2, y, 4, "進捗");
 y = sub(X2, y, "実装・改善したこと");
 const statW = (CW - 0.8) / 3;
 [
-  ["±5%以内", "検出した歩数の誤差\n(過検出を是正)"],
-  ["15.6→2.4回", "粒子の全滅回数\n(3本の平均)"],
+  ["±5%以内", "検出した歩数の誤差\n（過検出を是正）"],
+  ["10.7→1.0回", "全滅回数（2本の平均）\n9月2日の是正の前後"],
   ["提案1・2", "実装して既定で\n有効にした"],
 ].forEach(([big, label], i) => {
   const x = X2 + i * (statW + 0.4);
@@ -138,10 +138,10 @@ const statW = (CW - 0.8) / 3;
 });
 y += 3.0;
 
-y = sub(X2, y, "4方式の比較(実測データ 記録1441・1442)");
+y = sub(X2, y, "4方式の比較（実測データ 記録1441・1442）");
 h = img("poster_推定軌跡_1441_1442.png", X2 + 1.3, y, CW - 2.6);
 y += h + 0.05;
-caption("推定軌跡(乱数の初期値42の1回分)", X2, y, CW);
+caption("推定軌跡（乱数のシード42の1回分）", X2, y, CW);
 y += 0.65;
 
 const hdr = (t) => ({ text: t, options: { bold: true, color: C.white, fill: { color: C.teal }, align: "center", valign: "middle" } });
@@ -152,7 +152,7 @@ s.addTable([
   [H2("方式", { rowspan: 2 }), H2("記録1441", { colspan: 2 }), H2("記録1442", { colspan: 2 })],
   [H2("終点誤差[m]"), H2("全滅[回]"), H2("終点誤差[m]"), H2("全滅[回]")],
   [cell("A PDRのみ", { align: "left" }), cell("18.46"), cell("－"), cell("13.32"), cell("－")],
-  [cell("B 固定粒子数PF(600個)", { align: "left" }), cell("17.49±1.39"), cell("0.00"), cell("19.02±6.84"), cell("2.67")],
+  [cell("B 固定粒子数PF（600個）", { align: "left" }), cell("17.49±1.39"), cell("0.00"), cell("19.02±6.84"), cell("2.67")],
   [cell("C 移動様態適応PF[4]", { align: "left" }), cell("17.16±0.53"), cell("0.00"), cell("13.29±1.54"), cell("1.50")],
   [cell("E 提案方式(C＋提案1・2)", { align: "left", bold: true }), cell("15.75±0.43", best), cell("0.00"), cell("12.57±1.21", best), cell("0.17")],
 ], {
@@ -160,7 +160,7 @@ s.addTable([
   border: { type: "solid", pt: 1, color: C.line }, margin: 0.06,
 });
 y += 0.58 * 6 + 0.2;
-T("6シードの平均±標準偏差(Aは乱数を使わないので1回)．2本は条件の調整に用いたデータで評価用ではない．時刻と対応した正解位置がないため，RMSEの代わりに終点誤差(推定の終点と申告した終点の距離)を見た",
+T("6シードの平均±標準偏差（Aは乱数を使わないので1回）．2本は条件の調整に用いたデータで評価用ではない．時刻と対応した正解位置がないため，RMSEの代わりに終点誤差（推定の終点と申告した終点の距離）を見た",
   { x: X2, y, w: CW, h: 1.2, fontSize: 20, color: C.muted, lineSpacingMultiple: 1.05 });
 y += 1.35;
 T([
@@ -172,19 +172,19 @@ y += 1.45;
 y = sub(X2, y, "分かった課題：移動様態の判定が「曲がり」から戻らない");
 h = img("poster_曲がり判定_1441_1442.png", X2, y, 9.6);
 T([
-  { text: "実際の曲がり角は2か所だが，歩の85〜100%が「曲がり」と判定された", options: { bold: true, breakLine: true } },
+  { text: "実際の曲がり角は2か所だが，歩数の85〜100%が「曲がり」と判定された", options: { bold: true, breakLine: true } },
   { text: " ", options: { breakLine: true, fontSize: 12 } },
-  { text: "直進中も歩行の揺れでヨーレートが15〜19度/秒あり，曲がり終了の条件(10度/秒未満)を下回らない", options: { breakLine: true } },
+  { text: "直進中も歩行の揺れでヨーレートが15〜19度/秒あり，曲がりを終えるしきい値（10度/秒）を下回らない", options: { breakLine: true } },
   { text: " ", options: { breakLine: true, fontSize: 12 } },
-  { text: "→ 今は，移動様態に合わせる効果(BとCの差)を示せていない" },
+  { text: "→ 今は，移動様態に合わせる効果（BとCの差）を示せていない" },
 ], { x: X2 + 9.9, y: y + 0.3, w: CW - 9.9, h: h - 0.3, fontSize: 25, lineSpacingMultiple: 1.1 });
 y += h + 0.5;
 
 y = section(X2, y, 5, "今後の予定");
 const steps = [
   ["追加計測", "校正用の直線歩行と，地点ごとに時刻を記録する評価用の歩行"],
-  ["条件の決め直し", "歩幅の校正ゲインと曲がり判定のしきい値を校正用データで決める"],
-  ["RMSEで比較", "正解位置を使い4方式と提案1・2の効果を確かめる(11月末まで)"],
+  ["条件の決め直し", "歩幅の校正ゲインと曲がり終了のしきい値を校正用データで決め直す"],
+  ["RMSEで比較", "正解位置を用いたRMSEで4方式を比べ，提案1・2の効果を確かめる（11月末まで）"],
   ["卒業論文", "12月に全章の初稿"],
 ];
 const stW = (CW - 3 * 0.45) / 4, stH = H - M - y;
