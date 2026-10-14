@@ -1,0 +1,7 @@
+file,purpose,route,distance_m,speed,use,start_heading_deg,memo
+pdr_log_0805_1438.csv,calib,,71.36,,1,,直線ではない既知距離の経路。開始位置(start_positions.csv)と確定経路(425,230)→(425,115)→(800,115)から算出。2.10の再現確認用で、新しい校正には使わない
+pdr_log_0805_1441.csv,calib,,67.40,,1,,同上
+pdr_log_0805_1442.csv,calib,,67.40,,1,,同上
+pdr_log_0805_1438.csv,eval,,,,1,0,run_evaluation.pyの動作確認用。経路が未定義で地点マークも無いのでRMSEは出ない(軌跡だけ)。東向きに歩き始めた
+pdr_log_0805_1441.csv,eval,,,,1,0,同上
+pdr_log_0805_1442.csv,eval,,,,1,0,同上
